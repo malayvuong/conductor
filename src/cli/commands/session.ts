@@ -313,23 +313,62 @@ function showGoalInsights(goal: Goal, db: import('better-sqlite3').Database): vo
   console.log('');
 
   const seenDecisions = new Set<string>();
-  let hasAny = false;
+  const seenAssumptions = new Set<string>();
+  const seenQuestions = new Set<string>();
+  const seenFollowUps = new Set<string>();
+  const seenConstraints = new Set<string>();
+
+  const sections: { label: string; items: Array<{ snap: number; text: string }> }[] = [
+    { label: 'Decisions', items: [] },
+    { label: 'Assumptions', items: [] },
+    { label: 'Open Questions', items: [] },
+    { label: 'Follow-ups', items: [] },
+    { label: 'Constraints', items: [] },
+  ];
 
   for (let i = 0; i < snapshots.length; i++) {
     const snap = snapshots[i];
-    const decisions = snap.decisions ? safeParseArray(snap.decisions) : [];
-    for (const d of decisions) {
-      const text = typeof d === 'string' ? d : d.decision || JSON.stringify(d);
-      if (!seenDecisions.has(text)) {
-        if (!hasAny) { console.log('  Decisions:'); hasAny = true; }
-        console.log(`    [Snap ${i + 1}] ${text}`);
-        seenDecisions.add(text);
+    const snapNum = i + 1;
+
+    collectInsights(snap.decisions, seenDecisions, sections[0].items, snapNum,
+      d => typeof d === 'string' ? d : d.decision || JSON.stringify(d));
+    collectInsights(snap.assumptions, seenAssumptions, sections[1].items, snapNum);
+    collectInsights(snap.unresolved_questions, seenQuestions, sections[2].items, snapNum);
+    collectInsights(snap.follow_ups, seenFollowUps, sections[3].items, snapNum);
+    collectInsights(snap.constraints, seenConstraints, sections[4].items, snapNum);
+  }
+
+  let hasAny = false;
+  for (const section of sections) {
+    if (section.items.length > 0) {
+      hasAny = true;
+      console.log(`  ${section.label}:`);
+      for (const item of section.items) {
+        console.log(`    [Snap ${item.snap}] ${item.text}`);
       }
+      console.log('');
     }
   }
 
   if (!hasAny) {
     console.log('  No insights recorded yet.');
+  }
+}
+
+function collectInsights(
+  json: string | null | undefined,
+  seen: Set<string>,
+  items: Array<{ snap: number; text: string }>,
+  snapNum: number,
+  transform?: (item: any) => string,
+): void {
+  const parsed = safeParseArray(json);
+  for (const item of parsed) {
+    const text = transform ? transform(item) : (typeof item === 'string' ? item : JSON.stringify(item));
+    if (!seen.has(text)) {
+      seen.add(text);
+      items.push({ snap: snapNum, text });
+    }
   }
 }
 
