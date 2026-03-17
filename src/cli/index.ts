@@ -4,6 +4,7 @@ import { registerRunCommand } from './commands/run.js';
 import { registerTasksCommand } from './commands/tasks.js';
 import { registerLogsCommand } from './commands/logs.js';
 import { registerReportCommand } from './commands/report.js';
+import { registerResumeCommand } from './commands/resume.js';
 
 const program = new Command();
 
@@ -16,5 +17,6 @@ registerRunCommand(program);
 registerTasksCommand(program);
 registerLogsCommand(program);
 registerReportCommand(program);
+registerResumeCommand(program);
 
 program.parse();
