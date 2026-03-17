@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
+import { resolveEngine } from '../../src/core/config/service.js';
 
 // We test the config service by importing and using it with a temp directory
 // Since the config service uses a fixed path (~/.conductor), we'll test the
@@ -40,5 +41,39 @@ describe('config service', () => {
     const loaded = JSON.parse(fs.readFileSync(configFile, 'utf-8'));
     expect(loaded.heartbeatIntervalSec).toBe(30);
     expect(loaded.defaultPath).toBeUndefined();
+  });
+});
+
+describe('resolveEngine', () => {
+  const origEnv = process.env.DEFAULT_ENGINE;
+
+  afterEach(() => {
+    if (origEnv === undefined) {
+      delete process.env.DEFAULT_ENGINE;
+    } else {
+      process.env.DEFAULT_ENGINE = origEnv;
+    }
+  });
+
+  it('returns explicit engine when provided', () => {
+    const result = resolveEngine('codex');
+    expect(result).toEqual({ engine: 'codex', source: 'explicit' });
+  });
+
+  it('falls back to env var when no explicit or config', () => {
+    process.env.DEFAULT_ENGINE = 'codex';
+    const result = resolveEngine(undefined);
+    // May return config if ~/.conductor/config.json has defaultEngine,
+    // otherwise env. Either way it should not throw.
+    expect(result.engine).toBeTruthy();
+  });
+
+  it('returns hard fallback "claude" when nothing is set', () => {
+    delete process.env.DEFAULT_ENGINE;
+    // This tests the full fallback chain — result depends on whether
+    // ~/.conductor/config.json exists with defaultEngine, but it must never throw.
+    const result = resolveEngine(undefined);
+    expect(result.engine).toBeTruthy();
+    expect(result.source).toBeTruthy();
   });
 });

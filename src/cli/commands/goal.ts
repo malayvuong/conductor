@@ -7,7 +7,7 @@ import {
   listGoals,
 } from '../../core/storage/supervisor-repository.js';
 import { parsePlan, createSingleWPPlan } from '../../core/supervisor/plan-parser.js';
-import { loadConfig } from '../../core/config/service.js';
+import { loadConfig, resolveEngine } from '../../core/config/service.js';
 import { countWPsByStatus } from '../../core/supervisor/scheduler.js';
 import { log } from '../../utils/logger.js';
 import type { GoalType } from '../../types/supervisor.js';
@@ -31,11 +31,7 @@ export function registerGoalCommand(program: Command): void {
       const config = loadConfig();
 
       // Resolve engine and path
-      const engine = opts.engine || config.defaultEngine;
-      if (!engine) {
-        log.error('No engine specified. Use --engine or set defaultEngine in config.');
-        process.exit(1);
-      }
+      const { engine } = resolveEngine(opts.engine);
 
       const projectPath = opts.path || config.defaultPath;
       if (!projectPath) {

@@ -11,7 +11,7 @@ import {
 import { countWPsByStatus } from '../../core/supervisor/scheduler.js';
 import { buildCloseoutSummary } from '../../core/supervisor/closeout.js';
 import { getSessionWarnings } from '../../core/supervisor/hygiene.js';
-import { loadConfig } from '../../core/config/service.js';
+import { loadConfig, resolveEngine } from '../../core/config/service.js';
 import { log } from '../../utils/logger.js';
 import type { Session, Goal } from '../../types/supervisor.js';
 
@@ -434,11 +434,7 @@ export function registerSessionCommand(program: Command): void {
       const db = getDb();
       const config = loadConfig();
 
-      const engine = opts.engine || config.defaultEngine;
-      if (!engine) {
-        log.error('No engine specified. Use --engine or set defaultEngine in config.');
-        process.exit(1);
-      }
+      const { engine, source } = resolveEngine(opts.engine);
 
       const projectPath = opts.path || config.defaultPath || process.cwd();
       if (!fs.existsSync(projectPath)) {
@@ -470,8 +466,9 @@ export function registerSessionCommand(program: Command): void {
       });
       updateSessionStatus(db, session.id, 'active');
 
+      const sourceLabel = source === 'explicit' ? '' : ` (${source})`;
       log.info(`Session started: ${name}`);
-      console.log(`  Engine: ${engine}`);
+      console.log(`  Engine: ${engine}${sourceLabel}`);
       console.log(`  Path:   ${projectPath}`);
       console.log('');
       console.log('Next: cdx execute <plan.md> --until-done');

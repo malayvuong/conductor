@@ -35,3 +35,28 @@ export function saveConfig(config: ConductorConfig): void {
 export function getConfigPath(): string {
   return CONFIG_FILE;
 }
+
+const HARD_FALLBACK_ENGINE = 'claude';
+
+/**
+ * Resolve engine with graceful fallback chain:
+ *   1. Explicit override (CLI flag, session field)
+ *   2. Config defaultEngine
+ *   3. DEFAULT_ENGINE env var
+ *   4. Hard fallback: "claude"
+ *
+ * Returns { engine, source } so callers can log provenance.
+ */
+export function resolveEngine(explicit?: string): { engine: string; source: string } {
+  if (explicit) {
+    return { engine: explicit, source: 'explicit' };
+  }
+  const config = loadConfig();
+  if (config.defaultEngine) {
+    return { engine: config.defaultEngine, source: 'config' };
+  }
+  if (process.env.DEFAULT_ENGINE) {
+    return { engine: process.env.DEFAULT_ENGINE, source: 'env' };
+  }
+  return { engine: HARD_FALLBACK_ENGINE, source: 'default fallback' };
+}

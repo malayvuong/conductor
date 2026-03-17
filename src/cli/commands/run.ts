@@ -13,7 +13,7 @@ import { runProcess } from '../../core/runner/process.js';
 import { HeartbeatMonitor } from '../../core/heartbeat/monitor.js';
 import { log } from '../../utils/logger.js';
 import { generateReport } from '../../core/report/generator.js';
-import { loadConfig } from '../../core/config/service.js';
+import { loadConfig, resolveEngine } from '../../core/config/service.js';
 import { parseClaudeStreamEvent } from '../../core/engine/stream-parser.js';
 import type { Run, RunStatus } from '../../types/index.js';
 
@@ -40,12 +40,8 @@ export function registerRunCommand(program: Command): void {
       }
       opts.path = workspacePath;
 
-      // Resolve engine: CLI flag > config default
-      const engineName = opts.engine || config.defaultEngine;
-      if (!engineName) {
-        log.error('No engine specified. Use --engine or set defaultEngine in config.');
-        process.exit(1);
-      }
+      // Resolve engine: CLI flag > config default > env > "claude"
+      const { engine: engineName, source: engineSource } = resolveEngine(opts.engine);
       const validEngines = ['claude', 'codex'];
       if (!validEngines.includes(engineName)) {
         log.error(`Unknown engine: ${engineName}. Available: ${validEngines.join(', ')}`);
