@@ -3,12 +3,13 @@ import { getDb } from '../../core/storage/db.js';
 import {
   createTask, updateTaskNormalized, updateTaskStatus,
   createRun, updateRunStarted, updateRunPid, updateRunFinished,
-  appendRunLog,
+  appendRunLog, createHeartbeat,
 } from '../../core/storage/repository.js';
 import { normalizeTask } from '../../core/task/normalizer.js';
 import { buildPrompt } from '../../core/prompt/builder.js';
 import { getEngine } from '../../core/engine/types.js';
 import { runProcess } from '../../core/runner/process.js';
+import { HeartbeatMonitor } from '../../core/heartbeat/monitor.js';
 import { log } from '../../utils/logger.js';
 
 export function registerRunCommand(program: Command): void {
@@ -80,10 +81,24 @@ export function registerRunCommand(program: Command): void {
       log.info('Starting engine process...');
       console.log('');
 
+      // Start heartbeat
+      const heartbeat = new HeartbeatMonitor({
+        intervalMs: 15000, // 15 seconds
+        stuckThresholdSeconds: 60,
+        onHeartbeat: (status, summary, noOutputSeconds) => {
+          createHeartbeat(db, { run_id: run.id, status, summary, no_output_seconds: noOutputSeconds });
+          if (status === 'suspected_stuck') {
+            log.error(`⚠ Suspected stuck: no output for ${Math.round(noOutputSeconds)}s`);
+          }
+        },
+      });
+      heartbeat.start();
+
       try {
         const result = await runProcess(command, {
           onLine: (stream, line) => {
             appendRunLog(db, run.id, stream, line);
+            heartbeat.recordOutput(line);
             const prefix = stream === 'stderr' ? '[ERR] ' : '';
             console.log(`${prefix}${line}`);
           },
@@ -97,12 +112,14 @@ export function registerRunCommand(program: Command): void {
         const status = result.exitCode === 0 ? 'completed' : 'failed';
         updateRunFinished(db, run.id, status, result.exitCode);
         updateTaskStatus(db, task.id, status);
+        heartbeat.stop();
 
         console.log('');
         log.info(`Run finished with exit code: ${result.exitCode}`);
         log.info(`Run ID: ${run.id.slice(0, 8)}`);
         log.info(`Status: ${status}`);
       } catch (err: any) {
+        heartbeat.stop();
         updateRunFinished(db, run.id, 'failed', null);
         updateTaskStatus(db, task.id, 'failed');
         log.error(`Process error: ${err.message}`);
