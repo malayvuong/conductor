@@ -195,19 +195,23 @@ interface CreateSnapshotInput {
   blockers_encountered?: string | null;
   next_action: string;
   run_id?: string | null;
+  assumptions?: string | null;
+  unresolved_questions?: string | null;
+  follow_ups?: string | null;
 }
 
 export function createSnapshot(db: Database.Database, input: CreateSnapshotInput): Snapshot {
   const id = randomUUID();
   db.prepare(
-    `INSERT INTO snapshots (id, session_id, goal_id, current_wp_id, trigger, summary, completed_items, in_progress_items, remaining_items, decisions, constraints, related_files, blockers_encountered, next_action, run_id)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    `INSERT INTO snapshots (id, session_id, goal_id, current_wp_id, trigger, summary, completed_items, in_progress_items, remaining_items, decisions, constraints, related_files, blockers_encountered, next_action, run_id, assumptions, unresolved_questions, follow_ups)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
     id, input.session_id, input.goal_id, input.current_wp_id ?? null,
     input.trigger, input.summary,
     input.completed_items ?? null, input.in_progress_items ?? null, input.remaining_items ?? null,
     input.decisions ?? null, input.constraints ?? null, input.related_files ?? null,
     input.blockers_encountered ?? null, input.next_action, input.run_id ?? null,
+    input.assumptions ?? null, input.unresolved_questions ?? null, input.follow_ups ?? null,
   );
   return getSnapshotById(db, id)!;
 }
