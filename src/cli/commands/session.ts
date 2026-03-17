@@ -374,6 +374,91 @@ export function registerSessionCommand(program: Command): void {
       const goals = getGoalsBySession(db, session.id);
       showSessionHistory(session, goals, db);
     });
+
+  // cdx session current
+  sessionCmd
+    .command('current')
+    .description('Show which session is active')
+    .action(async () => {
+      const db = getDb();
+      const session = resolveSession(db);
+      if (!session) {
+        console.log('No active session.');
+        return;
+      }
+      console.log(`  ${session.name} (${session.status})`);
+    });
+
+  // cdx session pause
+  sessionCmd
+    .command('pause')
+    .description('Pause current session and active goal')
+    .action(async () => {
+      const db = getDb();
+      const session = resolveSession(db);
+      if (!session) {
+        console.log('No active session to pause.');
+        return;
+      }
+      if (session.status === 'paused') {
+        console.log(`Session "${session.name}" is already paused.`);
+        return;
+      }
+
+      const goals = getGoalsBySession(db, session.id);
+      const activeGoal = goals.find(g => g.id === session.active_goal_id && isUnfinished(g.status));
+
+      pauseCurrentSession(db, session);
+
+      console.log(`⏸ Paused: ${session.name}`);
+      if (activeGoal) {
+        const wps = getWPsByGoal(db, activeGoal.id);
+        const counts = countWPsByStatus(wps);
+        console.log(`  Goal "${activeGoal.title}" paused (${counts.completed || 0}/${wps.length} WPs done)`);
+      }
+    });
+
+  // cdx session resume [name]
+  sessionCmd
+    .command('resume [name]')
+    .description('Resume a paused session')
+    .action(async (name?: string) => {
+      const db = getDb();
+
+      let session;
+      if (name) {
+        session = getSessionByName(db, name);
+        if (!session) {
+          log.error(`Session "${name}" not found.`);
+          process.exit(1);
+        }
+      } else {
+        session = db.prepare(
+          `SELECT * FROM sessions WHERE status = 'paused' ORDER BY updated_at DESC LIMIT 1`
+        ).get() as Session | undefined;
+        if (!session) {
+          console.log('No paused session to resume.');
+          return;
+        }
+      }
+
+      if (session.status !== 'paused' && session.status !== 'created') {
+        console.log(`Session "${session.name}" is ${session.status}. Cannot resume.`);
+        return;
+      }
+
+      activateSession(db, session.id);
+
+      const goals = getGoalsBySession(db, session.id);
+      const activeGoal = goals.find(g => g.status === 'active' || g.status === 'paused' || g.status === 'created');
+
+      console.log(`▶ Resumed: ${session.name}`);
+      if (activeGoal) {
+        const wps = getWPsByGoal(db, activeGoal.id);
+        const counts = countWPsByStatus(wps);
+        console.log(`  Continuing goal: ${activeGoal.title} (${counts.completed || 0}/${wps.length} WPs done)`);
+      }
+    });
 }
 
 // ---- Top-level aliases ----

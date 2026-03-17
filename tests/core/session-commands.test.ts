@@ -97,3 +97,27 @@ describe('activateSession', () => {
     expect(getSessionById(db, s.id)!.active_goal_id).toBe(g2.id);
   });
 });
+
+describe('session current', () => {
+  it('resolves active session', () => {
+    const s = createSession(db, { name: 'my-project', project_path: '/tmp', engine: 'claude' });
+    updateSessionStatus(db, s.id, 'active');
+
+    const current = resolveSession(db);
+    expect(current).toBeDefined();
+    expect(current!.name).toBe('my-project');
+  });
+});
+
+describe('session resume with name', () => {
+  it('resumes specific session by name', () => {
+    const s1 = createSession(db, { name: 's1', project_path: '/tmp', engine: 'claude' });
+    updateSessionStatus(db, s1.id, 'paused');
+    const s2 = createSession(db, { name: 's2', project_path: '/tmp', engine: 'claude' });
+    updateSessionStatus(db, s2.id, 'paused');
+
+    activateSession(db, s1.id);
+    expect(getSessionById(db, s1.id)!.status).toBe('active');
+    expect(getSessionById(db, s2.id)!.status).toBe('paused');
+  });
+});
