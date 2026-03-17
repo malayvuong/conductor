@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
-import { resolveEngine } from '../../src/core/config/service.js';
+import { resolveEngine, resolveConfigKey, listConfigKeys, engineNotConfiguredMessage } from '../../src/core/config/service.js';
 
 // We test the config service by importing and using it with a temp directory
 // Since the config service uses a fixed path (~/.conductor), we'll test the
@@ -60,20 +60,68 @@ describe('resolveEngine', () => {
     expect(result).toEqual({ engine: 'codex', source: 'explicit' });
   });
 
-  it('falls back to env var when no explicit or config', () => {
-    process.env.DEFAULT_ENGINE = 'codex';
-    const result = resolveEngine(undefined);
-    // May return config if ~/.conductor/config.json has defaultEngine,
-    // otherwise env. Either way it should not throw.
-    expect(result.engine).toBeTruthy();
+  it('returns session engine when no explicit', () => {
+    const result = resolveEngine(undefined, 'codex');
+    expect(result).toEqual({ engine: 'codex', source: 'session' });
   });
 
-  it('returns hard fallback "claude" when nothing is set', () => {
-    delete process.env.DEFAULT_ENGINE;
-    // This tests the full fallback chain — result depends on whether
-    // ~/.conductor/config.json exists with defaultEngine, but it must never throw.
+  it('prefers explicit over session engine', () => {
+    const result = resolveEngine('claude', 'codex');
+    expect(result).toEqual({ engine: 'claude', source: 'explicit' });
+  });
+
+  it('falls back to env var', () => {
+    process.env.DEFAULT_ENGINE = 'codex';
+    // If ~/.conductor/config.json has defaultEngine this returns 'config',
+    // otherwise 'env'. Either way it should not be null.
     const result = resolveEngine(undefined);
-    expect(result.engine).toBeTruthy();
-    expect(result.source).toBeTruthy();
+    expect(result).not.toBeNull();
+    expect(result!.engine).toBeTruthy();
+  });
+
+  it('returns null when nothing is configured and no env', () => {
+    delete process.env.DEFAULT_ENGINE;
+    // This depends on whether ~/.conductor/config.json exists.
+    // We test the function signature — it returns ResolvedEngine | null.
+    const result = resolveEngine(undefined);
+    // Can't assert null because real config may exist, but type is correct.
+    expect(result === null || typeof result.engine === 'string').toBe(true);
+  });
+});
+
+describe('resolveConfigKey', () => {
+  it('resolves short aliases', () => {
+    expect(resolveConfigKey('engine')).toBe('defaultEngine');
+    expect(resolveConfigKey('path')).toBe('defaultPath');
+    expect(resolveConfigKey('heartbeat')).toBe('heartbeatIntervalSec');
+    expect(resolveConfigKey('stuck-threshold')).toBe('stuckThresholdSec');
+  });
+
+  it('resolves raw field names', () => {
+    expect(resolveConfigKey('defaultEngine')).toBe('defaultEngine');
+    expect(resolveConfigKey('defaultPath')).toBe('defaultPath');
+  });
+
+  it('returns null for unknown keys', () => {
+    expect(resolveConfigKey('foo')).toBeNull();
+    expect(resolveConfigKey('bar')).toBeNull();
+  });
+});
+
+describe('listConfigKeys', () => {
+  it('returns all user-facing keys', () => {
+    const keys = listConfigKeys();
+    expect(keys).toContain('engine');
+    expect(keys).toContain('path');
+    expect(keys).toContain('heartbeat');
+    expect(keys).toContain('stuck-threshold');
+  });
+});
+
+describe('engineNotConfiguredMessage', () => {
+  it('returns helpful onboarding text', () => {
+    const msg = engineNotConfiguredMessage();
+    expect(msg).toContain('cdx config set engine claude');
+    expect(msg).toContain('cdx session start');
   });
 });

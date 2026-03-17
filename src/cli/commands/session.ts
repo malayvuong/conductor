@@ -11,7 +11,7 @@ import {
 import { countWPsByStatus } from '../../core/supervisor/scheduler.js';
 import { buildCloseoutSummary } from '../../core/supervisor/closeout.js';
 import { getSessionWarnings } from '../../core/supervisor/hygiene.js';
-import { loadConfig, resolveEngine } from '../../core/config/service.js';
+import { loadConfig, resolveEngine, engineNotConfiguredMessage } from '../../core/config/service.js';
 import { log } from '../../utils/logger.js';
 import type { Session, Goal } from '../../types/supervisor.js';
 
@@ -434,7 +434,12 @@ export function registerSessionCommand(program: Command): void {
       const db = getDb();
       const config = loadConfig();
 
-      const { engine, source } = resolveEngine(opts.engine);
+      const resolved = resolveEngine(opts.engine);
+      if (!resolved) {
+        console.log(engineNotConfiguredMessage());
+        process.exit(1);
+      }
+      const { engine, source } = resolved;
 
       const projectPath = opts.path || config.defaultPath || process.cwd();
       if (!fs.existsSync(projectPath)) {
