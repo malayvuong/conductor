@@ -19,7 +19,8 @@ export function registerResumeCommand(program: Command): void {
   program
     .command('resume <taskId>')
     .description('Resume a task with context from previous runs')
-    .action(async (taskId: string) => {
+    .option('--task <task>', 'Override task description for this run')
+    .action(async (taskId: string, opts: { task?: string }) => {
       const db = getDb();
 
       // Find task (support short ID)
@@ -50,6 +51,9 @@ export function registerResumeCommand(program: Command): void {
         `\n## Last 20 log lines:\n${logTail}`,
       ].filter(Boolean).join('\n');
 
+      // Use override task description if provided
+      const taskDescription = opts.task || task.raw_input;
+
       // Build new prompt with resume context
       const resumePrompt = [
         buildPrompt({
@@ -57,7 +61,7 @@ export function registerResumeCommand(program: Command): void {
           task_type: task.task_type || 'debug_fix',
           variables: {
             workspace_path: task.workspace_path,
-            raw_input: task.raw_input,
+            raw_input: taskDescription,
           },
         }),
         '\n---\n',
@@ -67,6 +71,7 @@ export function registerResumeCommand(program: Command): void {
       ].join('\n');
 
       log.info(`Resuming task: ${task.id.slice(0, 8)}`);
+      if (opts.task) log.info(`Task override: ${opts.task}`);
       log.info(`Previous runs: ${prevRuns.length}`);
 
       // Get engine
