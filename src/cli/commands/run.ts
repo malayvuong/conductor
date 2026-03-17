@@ -2,6 +2,7 @@ import { Command } from 'commander';
 import { getDb } from '../../core/storage/db.js';
 import { createTask, updateTaskNormalized } from '../../core/storage/repository.js';
 import { normalizeTask } from '../../core/task/normalizer.js';
+import { buildPrompt } from '../../core/prompt/builder.js';
 import { log } from '../../utils/logger.js';
 
 export function registerRunCommand(program: Command): void {
@@ -31,7 +32,18 @@ export function registerRunCommand(program: Command): void {
       updateTaskNormalized(db, task.id, normalized.task_type, JSON.stringify(normalized));
       log.info(`Task type: ${normalized.task_type}`);
 
-      // TODO: prompt builder, engine adapter, runner (next phases)
-      console.log('\nNormalized task:', JSON.stringify(normalized, null, 2));
+      // Build prompt
+      const promptFinal = buildPrompt({
+        engine: opts.engine,
+        task_type: normalized.task_type,
+        variables: {
+          workspace_path: opts.path,
+          raw_input: opts.task,
+        },
+      });
+      log.info(`Prompt built (${promptFinal.length} chars)`);
+      console.log('\n--- Prompt ---');
+      console.log(promptFinal);
+      console.log('--- End Prompt ---\n');
     });
 }
