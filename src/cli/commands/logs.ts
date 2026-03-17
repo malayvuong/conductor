@@ -2,13 +2,16 @@ import { Command } from 'commander';
 import { getDb } from '../../core/storage/db.js';
 import { getRunLogs } from '../../core/storage/repository.js';
 import { findRunByPrefix } from '../../utils/lookup.js';
+import { interpretLogLine, formatEventForDisplay } from '../../core/engine/log-interpreter.js';
+import type { StreamType } from '../../types/index.js';
 
 export function registerLogsCommand(program: Command): void {
   program
     .command('logs <runId>')
     .description('View logs for a run')
     .option('--tail <n>', 'Show last N lines', '0')
-    .option('--stream <type>', 'Filter by stream type (stdout, stderr)')
+    .option('--stream <type>', 'Filter by stream type (stdout, stderr, system)')
+    .option('--raw', 'Show raw persisted lines without parsing')
     .action(async (runId: string, opts) => {
       const db = getDb();
 
@@ -35,11 +38,24 @@ export function registerLogsCommand(program: Command): void {
         return;
       }
 
+      let displayCount = 0;
       for (const entry of logs) {
-        const prefix = entry.stream_type === 'stderr' ? '[ERR] ' : '';
-        console.log(`${entry.seq.toString().padStart(5)} ${prefix}${entry.line}`);
+        if (opts.raw) {
+          // Raw mode: show exactly what's persisted
+          const prefix = entry.stream_type === 'stderr' ? '[ERR] ' : '';
+          console.log(`${entry.seq.toString().padStart(5)} ${prefix}${entry.line}`);
+          displayCount++;
+        } else {
+          // Parsed mode: interpret and display human-readable
+          const event = interpretLogLine(entry.stream_type as StreamType, entry.line);
+          const display = formatEventForDisplay(event);
+          if (display) {
+            console.log(`${entry.seq.toString().padStart(5)} ${display}`);
+            displayCount++;
+          }
+        }
       }
 
-      console.log(`\n--- ${logs.length} lines ---`);
+      console.log(`\n--- ${displayCount} lines (${logs.length} total) ---`);
     });
 }
