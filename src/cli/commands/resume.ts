@@ -12,6 +12,7 @@ import { HeartbeatMonitor } from '../../core/heartbeat/monitor.js';
 import { generateReport } from '../../core/report/generator.js';
 import { findTaskByPrefix } from '../../utils/lookup.js';
 import { log } from '../../utils/logger.js';
+import { parseClaudeStreamEvent } from '../../core/engine/stream-parser.js';
 import type { Task, Run, RunStatus } from '../../types/index.js';
 
 export function registerResumeCommand(program: Command): void {
@@ -108,14 +109,25 @@ export function registerResumeCommand(program: Command): void {
       });
       heartbeat.start();
 
+      const isStreaming = engine.streaming;
+
       try {
         const result = await runProcess(command, {
           cwd: task.workspace_path,
           onLine: (stream, line) => {
             appendRunLog(db, run.id, stream, line);
             heartbeat.recordOutput(line);
-            const prefix = stream === 'stderr' ? '[ERR] ' : '';
-            console.log(`${prefix}${line}`);
+
+            if (stream === 'stderr') {
+              console.log(`[ERR] ${line}`);
+            } else if (isStreaming) {
+              const parsed = parseClaudeStreamEvent(line);
+              if (parsed.display) {
+                console.log(parsed.display);
+              }
+            } else {
+              console.log(line);
+            }
           },
           onPid: (pid) => {
             updateRunPid(db, run.id, pid);

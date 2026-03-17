@@ -10,7 +10,7 @@ import { registerConfigCommands } from './commands/config.js';
 const program = new Command();
 
 program
-  .name('conductor')
+  .name('cdx')
   .description('Supervisor for AI coding CLIs')
   .version('0.1.0');
 

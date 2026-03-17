@@ -7,6 +7,7 @@ export interface EngineCommand {
 
 export interface EngineAdapter {
   name: string;
+  streaming: boolean;
   buildCommand(input: EngineCommandInput): EngineCommand;
   validateExecutable(): boolean;
 }

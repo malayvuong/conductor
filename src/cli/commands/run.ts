@@ -14,6 +14,7 @@ import { HeartbeatMonitor } from '../../core/heartbeat/monitor.js';
 import { log } from '../../utils/logger.js';
 import { generateReport } from '../../core/report/generator.js';
 import { loadConfig } from '../../core/config/service.js';
+import { parseClaudeStreamEvent } from '../../core/engine/stream-parser.js';
 import type { Run, RunStatus } from '../../types/index.js';
 
 export function registerRunCommand(program: Command): void {
@@ -150,14 +151,27 @@ export function registerRunCommand(program: Command): void {
       process.on('SIGINT', cleanup);
       process.on('SIGTERM', cleanup);
 
+      const isStreaming = engine.streaming;
+
       try {
         const result = await runProcess(command, {
           cwd: opts.path,
           onLine: (stream, line) => {
+            // Always persist raw line
             appendRunLog(db, run.id, stream, line);
             heartbeat.recordOutput(line);
-            const prefix = stream === 'stderr' ? '[ERR] ' : '';
-            console.log(`${prefix}${line}`);
+
+            if (stream === 'stderr') {
+              console.log(`[ERR] ${line}`);
+            } else if (isStreaming) {
+              // Parse JSON stream events for display
+              const parsed = parseClaudeStreamEvent(line);
+              if (parsed.display) {
+                console.log(parsed.display);
+              }
+            } else {
+              console.log(line);
+            }
           },
           onPid: (pid) => {
             childPid = pid;

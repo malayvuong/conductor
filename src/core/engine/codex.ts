@@ -3,6 +3,7 @@ import type { EngineAdapter, EngineCommand, EngineCommandInput } from './types.j
 
 export class CodexAdapter implements EngineAdapter {
   name = 'codex';
+  streaming = false;
 
   buildCommand(input: EngineCommandInput): EngineCommand {
     return {

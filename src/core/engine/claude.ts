@@ -3,12 +3,15 @@ import type { EngineAdapter, EngineCommand, EngineCommandInput } from './types.j
 
 export class ClaudeAdapter implements EngineAdapter {
   name = 'claude';
+  streaming = true;
 
   buildCommand(input: EngineCommandInput): EngineCommand {
     return {
       executable: 'claude',
       args: [
         '--print',
+        '--output-format', 'stream-json',
+        '--verbose',
         '--dangerously-skip-permissions',
       ],
       env: {},
