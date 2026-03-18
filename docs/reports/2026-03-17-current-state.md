@@ -2,7 +2,7 @@
 
 **Date:** 2026-03-18
 **Version:** 2026.3.18
-**Codebase:** ~6,200 lines source / ~4,500 lines tests / 299 test cases / 29 test files
+**Codebase:** ~6,400 lines source / ~5,000 lines tests / 349 test cases / 31 test files
 
 ---
 
@@ -11,6 +11,7 @@
 **What is working:**
 
 Supervisor Layer:
+- Session lifecycle: reusable labels, auto-archival on completion, run_index per label, `--label` inspect
 - Session-first UX: session start/list/status/inspect/history + current/pause/resume/switch/close
 - `cdx execute plan.md --until-done` — plan mode with WP decomposition
 - `cdx execute "task description" --until-done` — no-plan mode with evidence-based completion
@@ -23,7 +24,7 @@ Supervisor Layer:
 - Prompt strategy escalation: normal → focused → surgical → recovery
 - Snapshot compaction between runs preserves full execution context
 - Live progress output: compact single-line events replacing scattered log.info() calls
-- Inspect drill-down: `--goal N`, `--attempts`, `--snapshots`, `--insights` flags
+- Inspect drill-down: `--goal N`, `--attempts`, `--snapshots`, `--insights`, `--label` flags
 - Session management: current, pause, resume, switch, close commands
 - Session hygiene: passive warnings for stale sessions (>7 days) and paused goal accumulation (>=3)
 - History: compact format with seq numbers, `--verbose` for full detail
@@ -45,7 +46,7 @@ Execution Layer (stable):
 - Heartbeat monitoring (state-tracked, no spam)
 - Task-type-aware structured report generation
 - Resume with curated context from best previous run
-- 299 tests pass across 29 test files
+- 349 tests pass across 31 test files
 
 **What is partially implemented:**
 - `cdx logs` shows raw JSON lines for Claude runs (not parsed human-readable text)
@@ -61,16 +62,16 @@ Execution Layer (stable):
 
 | Command | Status | Notes |
 |---------|--------|-------|
-| `cdx session start <name>` | Working | Creates or reactivates session. Supports --engine, --path. |
+| `cdx session start <label>` | Working | Reusable labels. Creates new run if only archived exist, focuses active, resumes paused. |
 | `cdx session list` | Working | Lists sessions with status filter. |
 | `cdx session status` / `cdx status` | Working | Shows session, active goal, WP progress, retries, hygiene warnings. |
-| `cdx session inspect` / `cdx inspect` | Working | Full dump or drill-down with --goal, --attempts, --snapshots, --insights. |
-| `cdx session history` | Working | Compact format with seq numbers. --verbose for full detail. |
+| `cdx session inspect` / `cdx inspect` | Working | Full dump or drill-down with --goal, --attempts, --snapshots, --insights, --label. |
+| `cdx session history [label]` | Working | Current session or all runs for a label (including archived). |
 | `cdx session current` | Working | Shows which session is active. |
 | `cdx session pause` | Working | Pauses session + active goal. |
 | `cdx session resume [name]` | Working | Resumes paused session (by name or most recent). |
 | `cdx session switch <name>` | Working | Pauses current, activates target session. |
-| `cdx session close` | Working | Closes session. Unfinished goals → abandoned with closeout. |
+| `cdx session close` | Working | Archives session. Unfinished goals → abandoned with closeout. Label freed. |
 | `cdx execute [source] --until-done` | Working | Plan mode, no-plan mode, resume. Live progress output. |
 | `cdx run` | Working | Single-run orchestration (execution layer). |
 | `cdx resume <taskId>` | Working | Two-layer context selection + structured prompt. |
@@ -87,7 +88,7 @@ Execution Layer (stable):
 ## 3. Supervisor Layer
 
 ### Sessions
-**Status: Working.** Session is the primary UX surface. `getActiveSession()` prefers active/created, falls back to paused (handles Ctrl+C interrupts). Session resolution: by name or most recent active. Full lifecycle: current, pause, resume, switch, close. Shared primitives `pauseCurrentSession()` and `activateSession()` used across commands.
+**Status: Working (refactored).** Session names are reusable labels, not unique IDs. Completed sessions auto-archive, freeing the label for a new run. Each label has an auto-incrementing `run_index`. `getSessionByName()` returns only non-archived sessions. `getSessionsByLabel()` returns all runs (including archived) for history/inspect. Lifecycle: created → active → paused → archived. `cdx inspect --label` and `cdx session history <label>` support querying archived sessions. 24 regression tests cover label reuse, archival, metadata isolation, and migration.
 
 ### Goals
 **Status: Working.** Goals are internal to the supervisor. Two source types:
@@ -106,9 +107,11 @@ Lifecycle: created → active → paused/completed/failed/hard_blocked/abandoned
 **Status: Working.** Each run is tracked as an attempt with: prompt strategy, progress detection, files changed count, WP completion count, blocker info.
 
 ### Progress Detection
-**Status: Working.** Two modes:
+**Status: Working (fixed).** Two modes:
 - Plan mode: completion signal in report summary/final_output is sufficient
-- No-plan mode: completion signal + evidence required (files_changed, fix_applied, verification, or what_implemented)
+- No-plan mode: completion signal + evidence required (files_changed, files_inspected, fix_applied, verification, what_implemented, substantial output, or findings)
+
+Completion signal detection broadened to match `completed`, `done`, `finished` keywords (same as progress detector). Progress-without-completion now consumes retry budget to prevent infinite loop on single-task runs.
 
 ### Live Progress Output
 **Status: Working.** `formatProgressEvent()` pure functions format 9 event types as compact single-line output (7 original + heartbeat + stall_warning). Integrated into supervisor loop with real-time heartbeat visibility: file count, idle time, last tool, strategy. `LiveRunTracker` accumulates file/tool stats from streaming engine output. Stall detection emits visible warning when no output exceeds threshold.
@@ -147,7 +150,7 @@ Lifecycle: created → active → paused/completed/failed/hard_blocked/abandoned
 
 | Area | Status | Detail |
 |------|--------|--------|
-| Session management | Ready | Start, list, status, inspect, history, current, pause, resume, switch, close |
+| Session management | Ready | Reusable labels, auto-archival, run_index, --label inspect/history |
 | Plan execution | Ready | Parse → WPs → loop → snapshot → advance |
 | No-plan execution | Ready | Single WP with evidence-based completion |
 | Resume after interrupt | Ready | Ctrl+C pauses, next execute resumes seamlessly |
@@ -156,7 +159,7 @@ Lifecycle: created → active → paused/completed/failed/hard_blocked/abandoned
 | Closeout summary | Ready | Generated at all terminal states |
 | Insight extraction | Ready | Decisions, assumptions, questions, follow-ups, constraints from reports |
 | Live progress output | Ready | Compact single-line events during execution |
-| Inspect drill-down | Ready | --goal, --attempts, --snapshots, --insights flags |
+| Inspect drill-down | Ready | --goal, --attempts, --snapshots, --insights, --label flags |
 | Session hygiene | Ready | Passive warnings for stale sessions and paused goal accumulation |
 | Single-run execution | Ready | Full pipeline with diagnostics, streaming, reporting |
 | Engine execution | Ready (Claude) / Untested (Codex) | Claude adapter verified |
@@ -224,7 +227,7 @@ Lifecycle: created → active → paused/completed/failed/hard_blocked/abandoned
 | src/core/storage/schema.ts | SQL DDL + migrations (incl. enhanced compaction columns) |
 | src/core/storage/db.ts | SQLite singleton (WAL mode) |
 | src/core/storage/repository.ts | Execution layer CRUD |
-| src/core/storage/supervisor-repository.ts | Supervisor layer CRUD + getGoalBySeq |
+| src/core/storage/supervisor-repository.ts | Supervisor layer CRUD + label queries + run_index |
 | **Engine** | |
 | src/core/engine/types.ts | Adapter interface + factory |
 | src/core/engine/claude.ts | Claude CLI adapter |
@@ -245,7 +248,7 @@ Lifecycle: created → active → paused/completed/failed/hard_blocked/abandoned
 | src/types/supervisor.ts | Supervisor layer types (incl. enhanced Snapshot) |
 | src/core/engine/types.ts | Adapter interface + factory + getAvailableEngines() |
 | **Tests** | |
-| tests/ (29 files) | 299 test cases |
+| tests/ (31 files) | 349 test cases |
 | prompts/ (8 files) | Prompt templates |
 
 ---
@@ -256,8 +259,8 @@ Lifecycle: created → active → paused/completed/failed/hard_blocked/abandoned
 |------|---------------------------|----------------------------------|
 | UX surface | `cdx run --task "..."` | `cdx session start` → `cdx execute plan.md --until-done` |
 | Architecture | Single execution layer | Two-layer: supervisor + execution |
-| Session concept | None | Primary UX surface with name, status, goals |
-| Session management | None | current, pause, resume, switch, close |
+| Session concept | None | Reusable labels, auto-archival, run_index, `--label` inspect |
+| Session management | None | current, pause, resume, switch, close, history by label |
 | Goal management | None | Internal to supervisor, lifecycle states, auto-pause |
 | Work packages | None | Ordered, with retry budget, blocker tracking |
 | Execution loop | Single run | Supervisor loop: schedule → dispatch → evaluate → snapshot → advance |
@@ -273,5 +276,5 @@ Lifecycle: created → active → paused/completed/failed/hard_blocked/abandoned
 | Prompt strategy | Static | Escalation: normal → focused → surgical → recovery |
 | DB tables | 5 (tasks, runs, logs, heartbeats, reports) | 10 (+ sessions, goals, work_packages, snapshots, execution_attempts) |
 | State consistency | None | Transactional finalization, SIGINT-safe completion, 11 regression tests |
-| Source lines | ~1,700 | ~6,200 |
-| Test cases | 114 across 14 files | 299 across 29 files |
+| Source lines | ~1,700 | ~6,400 |
+| Test cases | 114 across 14 files | 349 across 31 files |

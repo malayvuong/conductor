@@ -78,6 +78,7 @@ CREATE TABLE IF NOT EXISTS sessions (
   project_path TEXT NOT NULL,
   engine TEXT NOT NULL,
   status TEXT NOT NULL DEFAULT 'created',
+  run_index INTEGER NOT NULL DEFAULT 1,
   active_goal_id TEXT,
   working_summary TEXT,
   decisions TEXT,
@@ -195,6 +196,9 @@ export function migrateSchema(db: import('better-sqlite3').Database): void {
   try { db.exec(`ALTER TABLE snapshots ADD COLUMN assumptions TEXT`); } catch { /* already exists */ }
   try { db.exec(`ALTER TABLE snapshots ADD COLUMN unresolved_questions TEXT`); } catch { /* already exists */ }
   try { db.exec(`ALTER TABLE snapshots ADD COLUMN follow_ups TEXT`); } catch { /* already exists */ }
+  // Session lifecycle: add run_index, migrate completed/abandoned → archived
+  try { db.exec(`ALTER TABLE sessions ADD COLUMN run_index INTEGER NOT NULL DEFAULT 1`); } catch { /* already exists */ }
+  try { db.exec(`UPDATE sessions SET status = 'archived' WHERE status IN ('completed', 'abandoned')`); } catch { /* no-op */ }
 }
 
 function migrateReportColumns(db: import('better-sqlite3').Database): void {

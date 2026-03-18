@@ -44,7 +44,7 @@ cdx session switch other-project          # switch sessions
 - **Supervisor Layer** — Sessions, goals, work packages, snapshots, execution attempts. Manages the "what to do next" loop: parse plan → create WPs → dispatch engine → evaluate result → snapshot state → repeat or finish.
 - **Execution Layer** — Tasks, runs, logs, reports, heartbeat. Handles the "how to run" mechanics: classify task → build prompt → spawn engine → stream output → generate report.
 
-**Session-first UX:** Sessions are the primary user-facing surface. Goals are internal state managed by the supervisor. Users never need to handle goal IDs in the happy path.
+**Session-first UX:** Sessions are the primary user-facing surface. Session names are **reusable labels** (e.g. `solo-defender`, `ispa-cms`) — not permanent unique IDs. When a session completes, it is archived automatically, and the label becomes available for a new run. Goals are internal state managed by the supervisor. Users never need to handle goal IDs or invent `-v2` suffixes.
 
 ## Prerequisites
 
@@ -93,33 +93,38 @@ cdx execute --until-done
 
 # View session history
 cdx session history
+cdx session history my-project            # all runs for a label
 
 # Session management
 cdx session current                       # which session is active
 cdx session pause                         # pause session + goal
 cdx session resume                        # resume most recent paused
 cdx session switch other-project          # switch sessions
-cdx session close                         # close session
+cdx session close                         # close + archive session
+
+# Label reuse — after completion, same label starts a fresh run
+cdx session start my-project              # → creates run #2
 
 # Inspect drill-down
 cdx inspect --goal 1                      # single goal detail
 cdx inspect --goal 1 --attempts           # attempt timeline
 cdx inspect --goal 1 --snapshots          # snapshot chain
 cdx inspect --goal 1 --insights           # decisions, assumptions, questions
+cdx inspect --label my-project            # all runs for a label (including archived)
 ```
 
 ## Commands
 
 ### Session Management
 
-#### `cdx session start <name>`
+#### `cdx session start <label>`
 
-Start or reactivate a session.
+Start a session under a reusable label.
 
 ```bash
-cdx session start my-project                          # uses config defaults
-cdx session start my-project --engine codex            # override engine
-cdx session start my-project --path /other/project     # override path
+cdx session start solo-defender                        # uses config defaults
+cdx session start solo-defender --engine codex          # override engine
+cdx session start solo-defender --path /other/project   # override path
 ```
 
 | Flag | Required | Description |
@@ -127,7 +132,16 @@ cdx session start my-project --path /other/project     # override path
 | `--engine` | No | Override default engine. Uses config/env fallback if omitted. |
 | `--path` | No | Override workspace path. Uses config default or cwd if omitted. |
 
-If a session with the same name already exists and is paused/created, it will be reactivated.
+**Behavior depends on existing sessions for that label:**
+
+| Existing state | Action |
+|----------------|--------|
+| No sessions | Create new session (run #1) |
+| Only archived runs | Create new session (run #N+1), show prior run count |
+| Active/created session | Focus existing session |
+| Paused session | Resume existing session |
+
+Labels are reusable — once a session is archived (completed or closed), the same label can be used for a fresh run. No need to invent `-v2`, `-v3` suffixes.
 
 #### `cdx session list`
 
@@ -137,10 +151,6 @@ List all sessions with status and goal count.
 cdx session list
 cdx session list --status active
 ```
-
-#### `cdx status`
-
-Show current session status: engine, path, active goal, WP progress, retries.
 
 #### `cdx session current`
 
@@ -160,7 +170,7 @@ Switch to another session (pauses current, activates target).
 
 #### `cdx session close`
 
-Close current session. Completed goals stay completed, unfinished goals are abandoned with closeout summaries.
+Close and archive the current session. Completed goals stay completed, unfinished goals are abandoned with closeout summaries. The label becomes available for a new session.
 
 #### `cdx status`
 
@@ -168,19 +178,27 @@ Show current session status: engine, path, active goal, WP progress, retries. In
 
 #### `cdx inspect`
 
-Detailed inspection of current session. Supports drill-down flags:
+Detailed inspection of current session or a label's full history.
 
 ```bash
-cdx inspect                          # full dump (default)
+cdx inspect                          # current active session
+cdx inspect --label solo-defender    # all runs for a label (including archived)
 cdx inspect --goal <N>               # single goal detail
 cdx inspect --goal <N> --attempts    # attempt timeline
 cdx inspect --goal <N> --snapshots   # snapshot chain
 cdx inspect --goal <N> --insights    # decisions, assumptions, questions, follow-ups, constraints
 ```
 
-#### `cdx session history`
+The `--label` flag is especially useful after a session has been archived — it lets you inspect completed work without needing an active session.
 
-View session goal history. Compact by default, `--verbose` for full detail.
+#### `cdx session history [label]`
+
+View session goal history. Without a label, shows the current active session. With a label, shows all runs (including archived) grouped by run index.
+
+```bash
+cdx session history                  # current session
+cdx session history solo-defender    # all runs for label
+```
 
 ### Execution
 
@@ -336,9 +354,11 @@ The supervisor loop (`cdx execute ... --until-done`) works as follows:
 
 **Prompt strategy escalation:** normal → focused → surgical → recovery (based on retry count).
 
-**Evidence-based completion** (ad-hoc mode): Completion signal alone is not enough — needs evidence (files_changed, fix_applied, verification, or what_implemented).
+**Evidence-based completion** (ad-hoc mode): Completion signal alone is not enough — needs evidence (files_changed, files_inspected, fix_applied, verification, what_implemented, substantial output, or findings).
 
 **Goal lifecycle:** created → active → paused/completed/failed/hard_blocked/abandoned.
+
+**Session lifecycle:** created → active → paused → archived. Completed sessions are automatically archived. The session label (e.g. `solo-defender`) becomes immediately reusable for a new run.
 
 **Closeout summary:** Generated at every terminal state with objective, files touched, decisions, blockers, and next recommended action.
 
@@ -397,7 +417,7 @@ Heartbeat: idle | idle: 35s
 SQLite at `data/conductor.db` with two layers:
 
 **Supervisor tables:**
-- **sessions** — name, title, engine, path, status, active_goal_id, working_summary, decisions
+- **sessions** — name (reusable label), run_index, title, engine, path, status, active_goal_id, working_summary, decisions
 - **goals** — title, description, type, source_type, status, completion_rules, closeout_summary
 - **work_packages** — seq, title, status, retry_count/budget, blocker_type/detail, done_criteria
 - **snapshots** — trigger, summary, completed/in-progress/remaining items, decisions, files, blockers, next_action, assumptions, unresolved_questions, follow_ups
@@ -471,14 +491,14 @@ conductor/
       lookup.ts                       # Short-ID prefix resolution
   prompts/                            # Prompt templates per engine/task type
   data/                               # SQLite DB (gitignored)
-  tests/                              # Vitest test suite (299 tests, 29 files)
+  tests/                              # Vitest test suite (349 tests, 31 files)
 ```
 
 ## Development
 
 ```bash
 npm run dev -- <command>     # Run CLI in dev mode (tsx)
-npm test                     # Run all tests (299 tests)
+npm test                     # Run all tests (349 tests)
 npm run test:watch           # Watch mode
 npm run build                # Compile TypeScript to dist/
 npm link                     # Link cdx command globally

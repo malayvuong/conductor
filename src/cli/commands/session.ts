@@ -7,6 +7,7 @@ import {
   getSnapshotsByGoal, getAttemptsByGoal, getSessionById,
   getGoalById, updateGoalStatus, updateSessionGoal, getGoalBySeq,
   updateGoalCloseout, getRunningAttempt,
+  getSessionsByLabel, countArchivedByLabel,
 } from '../../core/storage/supervisor-repository.js';
 import { getLatestHeartbeat, getRunById } from '../../core/storage/repository.js';
 import { countWPsByStatus } from '../../core/supervisor/scheduler.js';
@@ -68,6 +69,7 @@ export function activateSession(db: import('better-sqlite3').Database, sessionId
 function formatStatus(status: string): string {
   const map: Record<string, string> = {
     created: 'Created', active: 'Running', paused: 'Paused',
+    archived: 'Archived',
     completed: 'Done', failed: 'Failed', hard_blocked: 'Blocked',
     abandoned: 'Cancelled',
   };
@@ -88,7 +90,7 @@ function displayWarnings(warnings: import('../../core/supervisor/hygiene.js').Wa
 }
 
 function showSessionStatus(session: Session, goals: Goal[], db: import('better-sqlite3').Database): void {
-  console.log(`Session:  ${session.name} [${formatStatus(session.status)}]`);
+  console.log(`Session:  ${session.name} #${session.run_index} [${formatStatus(session.status)}]`);
   console.log(`Engine:   ${session.engine}`);
   console.log(`Path:     ${session.project_path}`);
 
@@ -167,7 +169,7 @@ function showLiveRunInfo(db: import('better-sqlite3').Database, goalId: string):
 function showSessionInspect(session: Session, goals: Goal[], db: import('better-sqlite3').Database): void {
   console.log('=== Session Details ===');
   console.log(`ID:          ${session.id}`);
-  console.log(`Name:        ${session.name}`);
+  console.log(`Name:        ${session.name} #${session.run_index}`);
   console.log(`Engine:      ${session.engine}`);
   console.log(`Path:        ${session.project_path}`);
   console.log(`Status:      ${formatStatus(session.status)}`);
@@ -416,7 +418,7 @@ function safeParseArray(json: string | null | undefined): any[] {
 }
 
 function showSessionHistory(session: Session, goals: Goal[], db: import('better-sqlite3').Database, verbose = false): void {
-  console.log(`Session: ${session.name} [${formatStatus(session.status)}]`);
+  console.log(`Session: ${session.name} #${session.run_index} [${formatStatus(session.status)}]`);
   console.log('');
 
   if (goals.length === 0) {
@@ -482,23 +484,29 @@ export function registerSessionCommand(program: Command): void {
         process.exit(1);
       }
 
-      // Check if session with this name already exists
+      // Check if a non-archived session exists for this label
       const existing = getSessionByName(db, name);
       if (existing) {
-        // Reactivate
-        if (existing.status === 'paused' || existing.status === 'created') {
+        // Active/created — focus it
+        if (existing.status === 'active' || existing.status === 'created') {
           updateSessionStatus(db, existing.id, 'active');
           const updated = getSessionById(db, existing.id)!;
-          log.info(`Session reactivated: ${updated.name}`);
+          log.info(`Active session already exists for label "${name}". Focused.`);
           showSessionStatus(updated, getGoalsBySession(db, updated.id), db);
-        } else {
-          log.info(`Session "${name}" exists [${existing.status}]`);
-          showSessionStatus(existing, getGoalsBySession(db, existing.id), db);
+          return;
         }
-        return;
+        // Paused — resume it
+        if (existing.status === 'paused') {
+          updateSessionStatus(db, existing.id, 'active');
+          const updated = getSessionById(db, existing.id)!;
+          log.info(`Resumed paused session: ${name}`);
+          showSessionStatus(updated, getGoalsBySession(db, updated.id), db);
+          return;
+        }
       }
 
-      // Create new session
+      // No active/paused session — create a fresh one (label may have archived runs)
+      const archivedCount = countArchivedByLabel(db, name);
       const session = createSession(db, {
         name,
         project_path: projectPath,
@@ -508,6 +516,10 @@ export function registerSessionCommand(program: Command): void {
 
       const sourceLabel = source === 'explicit' ? '' : ` (${source})`;
       log.info(`Session started: ${name}`);
+      if (archivedCount > 0) {
+        console.log(`  Prior runs: ${archivedCount} archived`);
+      }
+      console.log(`  Run:    #${session.run_index}`);
       console.log(`  Engine: ${engine}${sourceLabel}`);
       console.log(`  Path:   ${projectPath}`);
       console.log('');
@@ -531,7 +543,8 @@ export function registerSessionCommand(program: Command): void {
       for (const s of sessions) {
         const goals = getGoalsBySession(db, s.id);
         const goalCount = goals.length > 0 ? `${goals.length} goals` : 'no goals';
-        console.log(`  ${s.name.padEnd(25)} ${formatStatus(s.status).padEnd(10)} ${goalCount.padEnd(10)} ${s.updated_at}`);
+        const runLabel = `#${s.run_index}`;
+        console.log(`  ${s.name.padEnd(25)} ${runLabel.padEnd(5)} ${formatStatus(s.status).padEnd(10)} ${goalCount.padEnd(10)} ${s.updated_at}`);
       }
     });
 
@@ -553,53 +566,48 @@ export function registerSessionCommand(program: Command): void {
   // cdx session inspect
   sessionCmd
     .command('inspect')
-    .description('Detailed inspection of current session')
+    .description('Detailed inspection of current session or a label')
+    .option('--label <label>', 'Inspect all sessions for a label (including archived)')
     .option('--goal <n>', 'Show specific goal by sequence number', parseInt)
     .option('--attempts', 'Show attempt timeline for goal')
     .option('--snapshots', 'Show snapshot chain for goal')
     .option('--insights', 'Show decisions and insights for goal')
-    .action(async (opts: { goal?: number; attempts?: boolean; snapshots?: boolean; insights?: boolean }) => {
-      const db = getDb();
-      const session = resolveSession(db);
-      if (!session) {
-        console.log('No active session. Run: cdx session start <name> --path <path>');
-        return;
-      }
-
-      if (opts.goal) {
-        const goal = getGoalBySeq(db, session.id, opts.goal);
-        if (!goal) {
-          log.error(`Goal #${opts.goal} not found in session "${session.name}".`);
-          return;
-        }
-
-        if (opts.attempts) {
-          showGoalAttempts(goal, db);
-        } else if (opts.snapshots) {
-          showGoalSnapshots(goal, db);
-        } else if (opts.insights) {
-          showGoalInsights(goal, db);
-        } else {
-          showGoalDetail(goal, db);
-        }
-        return;
-      }
-
-      // Default: full dump
-      const goals = getGoalsBySession(db, session.id);
-      showSessionInspect(session, goals, db);
+    .action(async (opts: { label?: string; goal?: number; attempts?: boolean; snapshots?: boolean; insights?: boolean }) => {
+      handleInspect(opts);
     });
 
-  // cdx session history
+  // cdx session history [label]
   sessionCmd
-    .command('history')
-    .description('View session goal history as reference')
+    .command('history [label]')
+    .description('View session history (current session or all runs for a label)')
     .option('--verbose', 'Show detailed information')
-    .action(async (opts: { verbose?: boolean }) => {
+    .action(async (label: string | undefined, opts: { verbose?: boolean }) => {
       const db = getDb();
+
+      if (label) {
+        // Show all runs for this label
+        const sessions = getSessionsByLabel(db, label);
+        if (sessions.length === 0) {
+          console.log(`No sessions found for label "${label}".`);
+          return;
+        }
+        console.log(`History for "${label}" (${sessions.length} run${sessions.length > 1 ? 's' : ''}):`);
+        console.log('');
+        for (const s of sessions) {
+          const goals = getGoalsBySession(db, s.id);
+          const statusLabel = formatStatus(s.status);
+          console.log(`  Run #${s.run_index} [${statusLabel}]  ${s.created_at}`);
+          for (const g of goals) {
+            console.log(`    Goal: ${g.title} [${g.status}]`);
+          }
+          if (goals.length === 0) console.log('    (no goals)');
+        }
+        return;
+      }
+
       const session = resolveSession(db);
       if (!session) {
-        console.log('No active session. Run: cdx session start <name> --path <path>');
+        console.log('No active session. Use: cdx session history <label>');
         return;
       }
       const goals = getGoalsBySession(db, session.id);
@@ -617,7 +625,7 @@ export function registerSessionCommand(program: Command): void {
         console.log('No active session.');
         return;
       }
-      console.log(`  ${session.name} (${session.status})`);
+      console.log(`  ${session.name} #${session.run_index} (${session.status})`);
     });
 
   // cdx session pause
@@ -704,8 +712,8 @@ export function registerSessionCommand(program: Command): void {
         process.exit(1);
       }
 
-      if (target.status === 'completed' || target.status === 'abandoned') {
-        log.error(`Session "${name}" is ${target.status}. Use "cdx session start ${name}" to reactivate.`);
+      if (target.status === 'archived') {
+        log.error(`Session "${name}" is archived. Use "cdx session start ${name}" to create a new run.`);
         process.exit(1);
       }
 
@@ -760,16 +768,16 @@ export function registerSessionCommand(program: Command): void {
         }
       }
 
-      const finalStatus = allDone ? 'completed' : 'abandoned';
-      updateSessionStatus(db, session.id, finalStatus as any);
+      updateSessionStatus(db, session.id, 'archived');
 
-      console.log(`Session "${session.name}" closed.`);
+      console.log(`Session "${session.name}" closed and archived.`);
       if (completedCount > 0 || abandonedCount > 0) {
         const parts: string[] = [];
         if (completedCount > 0) parts.push(`${completedCount} completed`);
         if (abandonedCount > 0) parts.push(`${abandonedCount} paused (→ abandoned)`);
         console.log(`  Goals: ${parts.join(', ')}`);
       }
+      console.log(`  Label "${session.name}" is now available for a new session.`);
     });
 }
 
@@ -791,42 +799,64 @@ export function registerStatusCommand(program: Command): void {
     });
 }
 
+function handleInspect(opts: { label?: string; goal?: number; attempts?: boolean; snapshots?: boolean; insights?: boolean }): void {
+  const db = getDb();
+
+  // --label: inspect all runs for a label (including archived)
+  if (opts.label) {
+    const sessions = getSessionsByLabel(db, opts.label);
+    if (sessions.length === 0) {
+      console.log(`No sessions found for label "${opts.label}".`);
+      return;
+    }
+    for (const s of sessions) {
+      const goals = getGoalsBySession(db, s.id);
+      showSessionInspect(s, goals, db);
+      console.log('');
+    }
+    return;
+  }
+
+  // Default: inspect active session
+  const session = resolveSession(db);
+  if (!session) {
+    console.log('No active session. Use: cdx inspect --label <name>');
+    return;
+  }
+
+  if (opts.goal) {
+    const goal = getGoalBySeq(db, session.id, opts.goal);
+    if (!goal) {
+      log.error(`Goal #${opts.goal} not found in session "${session.name}".`);
+      return;
+    }
+
+    if (opts.attempts) {
+      showGoalAttempts(goal, db);
+    } else if (opts.snapshots) {
+      showGoalSnapshots(goal, db);
+    } else if (opts.insights) {
+      showGoalInsights(goal, db);
+    } else {
+      showGoalDetail(goal, db);
+    }
+    return;
+  }
+
+  const goals = getGoalsBySession(db, session.id);
+  showSessionInspect(session, goals, db);
+}
+
 export function registerInspectCommand(program: Command): void {
   program
     .command('inspect')
-    .description('Detailed inspection of current session')
+    .description('Detailed inspection of current session or a label')
+    .option('--label <label>', 'Inspect all sessions for a label (including archived)')
     .option('--goal <n>', 'Show specific goal by sequence number', parseInt)
     .option('--attempts', 'Show attempt timeline for goal')
     .option('--snapshots', 'Show snapshot chain for goal')
     .option('--insights', 'Show decisions and insights for goal')
-    .action(async (opts: { goal?: number; attempts?: boolean; snapshots?: boolean; insights?: boolean }) => {
-      const db = getDb();
-      const session = resolveSession(db);
-      if (!session) {
-        console.log('No active session. Run: cdx session start <name> --path <path>');
-        return;
-      }
-
-      if (opts.goal) {
-        const goal = getGoalBySeq(db, session.id, opts.goal);
-        if (!goal) {
-          log.error(`Goal #${opts.goal} not found in session "${session.name}".`);
-          return;
-        }
-
-        if (opts.attempts) {
-          showGoalAttempts(goal, db);
-        } else if (opts.snapshots) {
-          showGoalSnapshots(goal, db);
-        } else if (opts.insights) {
-          showGoalInsights(goal, db);
-        } else {
-          showGoalDetail(goal, db);
-        }
-        return;
-      }
-
-      const goals = getGoalsBySession(db, session.id);
-      showSessionInspect(session, goals, db);
+    .action(async (opts: { label?: string; goal?: number; attempts?: boolean; snapshots?: boolean; insights?: boolean }) => {
+      handleInspect(opts);
     });
 }

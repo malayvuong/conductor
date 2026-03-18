@@ -70,7 +70,7 @@ function finalizeGoalCompleted(
 
   const commit = db.transaction(() => {
     updateGoalStatus(db, goal.id, 'completed');
-    updateSessionStatus(db, session.id, 'completed');
+    updateSessionStatus(db, session.id, 'archived');
     // Closeout: inline to keep in transaction — errors must propagate
     const updatedGoal = getGoalById(db, goal.id)!;
     const attempts = getAttemptsByGoal(db, goal.id);

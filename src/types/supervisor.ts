@@ -1,6 +1,6 @@
 // ---- Supervisor Layer Types ----
 
-export type SessionStatus = 'created' | 'active' | 'paused' | 'completed' | 'abandoned';
+export type SessionStatus = 'created' | 'active' | 'paused' | 'archived';
 export type GoalStatus = 'created' | 'active' | 'paused' | 'completed' | 'failed' | 'hard_blocked' | 'abandoned';
 export type GoalType = 'execute_plan' | 'implement' | 'debug' | 'review' | 'custom' | 'ad_hoc';
 export type GoalSourceType = 'plan_file' | 'inline_task';
@@ -12,11 +12,12 @@ export type SnapshotTrigger = 'run_completed' | 'run_failed' | 'manual' | 'stall
 
 export interface Session {
   id: string;
-  name: string;
+  name: string;             // user-facing reusable label (e.g. "solo-defender")
   title: string;
   project_path: string;
   engine: string;
   status: SessionStatus;
+  run_index: number;         // auto-incrementing per label (1, 2, 3...)
   active_goal_id: string | null;
   working_summary: string | null;
   decisions: string | null;   // JSON: [{decision, reason, wp_id?, at}]

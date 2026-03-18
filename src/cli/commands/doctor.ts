@@ -66,7 +66,7 @@ export function registerDoctorCommand(program: Command): void {
         const active = getActiveSession(db);
         if (active) {
           hasSession = true;
-          sessionDetail = `${active.name} [${active.status}]`;
+          sessionDetail = `${active.name} #${active.run_index} [${active.status}]`;
         } else {
           const all = listSessions(db);
           if (all.length > 0) {

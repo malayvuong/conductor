@@ -72,7 +72,7 @@ function completeWP(goalId: string, sessionId: string, wpId: string, attemptNo: 
 function finalizeGoalCompleted(goalId: string, sessionId: string) {
   const commit = db.transaction(() => {
     updateGoalStatus(db, goalId, 'completed');
-    updateSessionStatus(db, sessionId, 'completed');
+    updateSessionStatus(db, sessionId, 'archived');
   });
   commit();
 }
@@ -100,7 +100,7 @@ describe('state consistency after full completion', () => {
     const finalGoal = getGoalById(db, goal.id)!;
     const finalSession = getSessionById(db, session.id)!;
     expect(finalGoal.status).toBe('completed');
-    expect(finalSession.status).toBe('completed');
+    expect(finalSession.status).toBe('archived');
   });
 
   it('20 WP completion persists correctly (regression for observed 5/20 bug)', () => {
@@ -127,7 +127,7 @@ describe('state consistency after full completion', () => {
 
     // Verify goal and session
     expect(getGoalById(db, goal.id)!.status).toBe('completed');
-    expect(getSessionById(db, session.id)!.status).toBe('completed');
+    expect(getSessionById(db, session.id)!.status).toBe('archived');
 
     // Verify attempts match WP count
     const attempts = getAttemptsByGoal(db, goal.id);
@@ -169,7 +169,7 @@ describe('SIGINT race condition prevention', () => {
 
     // Must be completed, not paused
     expect(getGoalById(db, goal.id)!.status).toBe('completed');
-    expect(getSessionById(db, session.id)!.status).toBe('completed');
+    expect(getSessionById(db, session.id)!.status).toBe('archived');
   });
 
   it('interrupt with incomplete WPs correctly pauses', () => {
@@ -213,7 +213,7 @@ describe('inspect/status consistency', () => {
     const dbWPs = getWPsByGoal(db, activeGoal!.id);
     const counts = countWPsByStatus(dbWPs);
 
-    expect(freshSession.status).toBe('completed');
+    expect(freshSession.status).toBe('archived');
     expect(activeGoal!.status).toBe('completed');
     expect(counts.completed).toBe(3);
     expect(dbWPs.length).toBe(3);
@@ -251,13 +251,13 @@ describe('transactional finalization', () => {
     // Use db.transaction as the fixed code does
     const commit = db.transaction(() => {
       updateGoalStatus(db, goal.id, 'completed');
-      updateSessionStatus(db, session.id, 'completed');
+      updateSessionStatus(db, session.id, 'archived');
     });
     commit();
 
     // Both must be updated together
     expect(getGoalById(db, goal.id)!.status).toBe('completed');
-    expect(getSessionById(db, session.id)!.status).toBe('completed');
+    expect(getSessionById(db, session.id)!.status).toBe('archived');
   });
 
   it('closeout is written within the same transaction', () => {
@@ -269,7 +269,7 @@ describe('transactional finalization', () => {
     // Simulate finalizeGoalCompleted with closeout
     const commit = db.transaction(() => {
       updateGoalStatus(db, goal.id, 'completed');
-      updateSessionStatus(db, session.id, 'completed');
+      updateSessionStatus(db, session.id, 'archived');
       updateGoalCloseout(db, goal.id, JSON.stringify({ final_status: 'completed', wps_completed: 2, wps_total: 2 }));
     });
     commit();
@@ -361,7 +361,7 @@ describe('persistCloseout error propagation', () => {
     // This should NOT throw — valid data
     const commit = db.transaction(() => {
       updateGoalStatus(db, goal.id, 'completed');
-      updateSessionStatus(db, session.id, 'completed');
+      updateSessionStatus(db, session.id, 'archived');
       // Closeout write
       updateGoalCloseout(db, goal.id, JSON.stringify({ final_status: 'completed' }));
     });

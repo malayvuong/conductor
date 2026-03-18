@@ -19,10 +19,15 @@ export function createSession(db: Database.Database, input: CreateSessionInput):
   const id = randomUUID();
   const now = new Date().toISOString();
   const title = input.title || input.name;
+  // Auto-increment run_index per label
+  const maxRow = db.prepare(
+    `SELECT COALESCE(MAX(run_index), 0) as max_idx FROM sessions WHERE name = ?`
+  ).get(input.name) as { max_idx: number };
+  const runIndex = maxRow.max_idx + 1;
   db.prepare(
-    `INSERT INTO sessions (id, name, title, project_path, engine, status, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, 'created', ?, ?)`
-  ).run(id, input.name, title, input.project_path, input.engine, now, now);
+    `INSERT INTO sessions (id, name, title, project_path, engine, status, run_index, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, 'created', ?, ?, ?)`
+  ).run(id, input.name, title, input.project_path, input.engine, runIndex, now, now);
   return getSessionById(db, id)!;
 }
 
@@ -30,8 +35,26 @@ export function getSessionById(db: Database.Database, id: string): Session | und
   return db.prepare('SELECT * FROM sessions WHERE id = ?').get(id) as Session | undefined;
 }
 
+/** Find the non-archived session for a label. Returns the most recent active/paused/created session. */
 export function getSessionByName(db: Database.Database, name: string): Session | undefined {
-  return db.prepare('SELECT * FROM sessions WHERE name = ?').get(name) as Session | undefined;
+  return db.prepare(
+    `SELECT * FROM sessions WHERE name = ? AND status != 'archived' ORDER BY updated_at DESC LIMIT 1`
+  ).get(name) as Session | undefined;
+}
+
+/** Get all sessions for a label (including archived), ordered by run_index. */
+export function getSessionsByLabel(db: Database.Database, label: string): Session[] {
+  return db.prepare(
+    `SELECT * FROM sessions WHERE name = ? ORDER BY run_index ASC`
+  ).all(label) as Session[];
+}
+
+/** Count archived sessions for a label. */
+export function countArchivedByLabel(db: Database.Database, label: string): number {
+  const row = db.prepare(
+    `SELECT COUNT(*) as cnt FROM sessions WHERE name = ? AND status = 'archived'`
+  ).get(label) as { cnt: number };
+  return row.cnt;
 }
 
 export function getActiveSession(db: Database.Database): Session | undefined {
