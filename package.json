@@ -1,19 +1,49 @@
 {
-  "name": "conductor",
-  "version": "2026.3.17",
-  "description": "Supervisor for AI coding CLIs",
+  "name": "@malayvuong/conductor-ai",
+  "version": "2026.03.0",
+  "description": "Autonomous execution supervisor for AI coding CLIs",
+  "keywords": [
+    "ai",
+    "supervisor",
+    "cli",
+    "claude",
+    "codex",
+    "automation",
+    "orchestration"
+  ],
+  "homepage": "https://github.com/nicepkg/conductor#readme",
+  "bugs": {
+    "url": "https://github.com/nicepkg/conductor/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/nicepkg/conductor.git"
+  },
+  "license": "MIT",
+  "author": "Nguyen Minh Vuong",
   "type": "module",
   "main": "dist/cli/index.js",
+  "types": "./dist/cli/index.d.ts",
   "bin": {
     "cdx": "dist/cli/index.js"
   },
+  "directories": {
+    "doc": "docs",
+    "test": "tests"
+  },
+  "files": [
+    "dist",
+    "prompts",
+    "README.md",
+    "LICENSE"
+  ],
   "scripts": {
     "build": "tsc",
     "dev": "tsx src/cli/index.ts",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "prepublishOnly": "npm run build"
   },
-  "license": "MIT",
   "dependencies": {
     "better-sqlite3": "^12.8.0",
     "commander": "^14.0.3",
@@ -25,5 +55,11 @@
     "tsx": "^4.21.0",
     "typescript": "^5.9.3",
     "vitest": "^4.1.0"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }
