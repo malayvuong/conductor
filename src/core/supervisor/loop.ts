@@ -38,6 +38,7 @@ import { parseClaudeStreamEvent } from '../engine/stream-parser.js';
 import { loadConfig } from '../config/service.js';
 import { log } from '../../utils/logger.js';
 import { formatProgressEvent, type ProgressEvent } from './progress-reporter.js';
+import { LiveRunTracker } from './live-tracker.js';
 
 function emit(event: ProgressEvent): void {
   console.log(formatProgressEvent(event));
@@ -86,6 +87,7 @@ export async function executeGoal(
         updateSessionStatus(db, session.id, 'completed');
         persistCloseout(db, goal, totalCost);
         const counts = countWPsByStatus(wps);
+        emit({ type: 'goal_end', completed: counts.completed || 0, total: wps.length, attempts: totalAttempts, cost: totalCost });
         return {
           status: 'completed',
           totalAttempts,
@@ -150,7 +152,9 @@ export async function executeGoal(
       });
 
       // 10. Execute engine (delegates to existing execution layer)
-      const runResult = await executeEngineRun(db, session, goal, wp, prompt, config);
+      const runResult = await executeEngineRun(db, session, goal, wp, prompt, config, {
+        wpIndex, wpTotal: wps.length, strategy,
+      });
 
       // Link run to attempt
       if (runResult.runId) {
@@ -258,6 +262,12 @@ interface EngineRunResult {
   cost: number | null;
 }
 
+interface RunContext {
+  wpIndex: number;
+  wpTotal: number;
+  strategy: string;
+}
+
 async function executeEngineRun(
   db: Database.Database,
   session: Session,
@@ -265,6 +275,7 @@ async function executeEngineRun(
   wp: import('../../types/supervisor.js').WorkPackage,
   prompt: string,
   config: import('../config/service.js').ConductorConfig,
+  ctx?: RunContext,
 ): Promise<EngineRunResult> {
   const engine = getEngine(session.engine);
   if (!engine.validateExecutable()) {
@@ -301,7 +312,10 @@ async function executeEngineRun(
   updateTaskStatus(db, task.id, 'running');
   updateRunStarted(db, run.id);
 
-  // Heartbeat
+  // Live tracking
+  const tracker = new LiveRunTracker();
+
+  // Heartbeat with live terminal output
   const heartbeatInterval = (config.heartbeatIntervalSec || 15) * 1000;
   const stuckThreshold = config.stuckThresholdSec || 60;
   const heartbeat = new HeartbeatMonitor({
@@ -309,6 +323,25 @@ async function executeEngineRun(
     stuckThresholdSeconds: stuckThreshold,
     onHeartbeat: (status, summary, noOutputSeconds) => {
       createHeartbeat(db, { run_id: run.id, status, summary, no_output_seconds: noOutputSeconds });
+
+      // Live terminal output
+      if (ctx) {
+        const idleSeconds = Math.round(noOutputSeconds);
+        if (status === 'suspected_stuck') {
+          emit({ type: 'stall_warning', wpIndex: ctx.wpIndex, wpTotal: ctx.wpTotal, idleSeconds });
+        } else {
+          emit({
+            type: 'heartbeat',
+            wpIndex: ctx.wpIndex,
+            wpTotal: ctx.wpTotal,
+            status,
+            idleSeconds,
+            filesTouched: tracker.getFilesTouched(),
+            lastTool: tracker.getLastTool(),
+            strategy: ctx.strategy,
+          });
+        }
+      }
     },
   });
   heartbeat.start();
@@ -324,6 +357,7 @@ async function executeEngineRun(
       onLine: (stream, line) => {
         appendRunLog(db, run.id, stream, line);
         heartbeat.recordOutput(line);
+        tracker.recordLine(stream as 'stdout' | 'stderr', line);
 
         if (stream === 'stderr') {
           // Don't spam terminal with stderr in supervisor mode

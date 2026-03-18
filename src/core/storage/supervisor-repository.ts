@@ -275,3 +275,10 @@ export function updateAttemptFinished(
 export function updateAttemptRunId(db: Database.Database, id: string, runId: string): void {
   db.prepare('UPDATE execution_attempts SET run_id = ? WHERE id = ?').run(runId, id);
 }
+
+/** Get the most recent running attempt for a goal (if any). */
+export function getRunningAttempt(db: Database.Database, goalId: string): ExecutionAttempt | undefined {
+  return db.prepare(
+    `SELECT * FROM execution_attempts WHERE goal_id = ? AND status = 'running' ORDER BY started_at DESC LIMIT 1`
+  ).get(goalId) as ExecutionAttempt | undefined;
+}

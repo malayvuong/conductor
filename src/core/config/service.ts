@@ -73,15 +73,23 @@ export interface ResolvedEngine {
  *   3. Global config defaultEngine
  *   4. DEFAULT_ENGINE env var
  *   5. null → caller should show onboarding help
+ *
+ * @param explicit  - CLI --engine flag value
+ * @param sessionEngine - engine stored in current session
+ * @param configOverride - for testing only; skips loadConfig()
  */
-export function resolveEngine(explicit?: string, sessionEngine?: string): ResolvedEngine | null {
+export function resolveEngine(
+  explicit?: string,
+  sessionEngine?: string,
+  configOverride?: ConductorConfig,
+): ResolvedEngine | null {
   if (explicit) {
     return { engine: explicit, source: 'explicit' };
   }
   if (sessionEngine) {
     return { engine: sessionEngine, source: 'session' };
   }
-  const config = loadConfig();
+  const config = configOverride ?? loadConfig();
   if (config.defaultEngine) {
     return { engine: config.defaultEngine, source: 'config' };
   }
@@ -95,12 +103,13 @@ export function resolveEngine(explicit?: string, sessionEngine?: string): Resolv
 export function engineNotConfiguredMessage(): string {
   return [
     'No engine configured yet.',
-    'Run one of the following:',
     '',
+    'Quick start:',
     '  cdx config set engine claude',
-    '  cdx session start <name> --engine claude',
+    '  cdx session start <name> --path /your/project/path',
+    '  cdx execute "your task" --until-done',
     '',
-    'After that, you can use:',
-    '  cdx session start <name>',
+    'Or specify engine inline:',
+    '  cdx session start <name> --engine claude',
   ].join('\n');
 }

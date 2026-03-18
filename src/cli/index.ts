@@ -10,6 +10,7 @@ import { registerSessionCommand, registerStatusCommand, registerInspectCommand }
 import { registerExecuteCommand } from './commands/execute.js';
 import { registerGoalCommand } from './commands/goal.js';
 import { registerConfigCommands } from './commands/config.js';
+import { registerDoctorCommand } from './commands/doctor.js';
 
 const program = new Command();
 
@@ -35,7 +36,8 @@ registerResumeCommand(program);
 // Internal/advanced
 registerGoalCommand(program);
 
-// Configuration
+// Configuration & diagnostics
 registerConfigCommands(program);
+registerDoctorCommand(program);
 
 program.parse();

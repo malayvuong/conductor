@@ -6,7 +6,9 @@ Supervisor for AI coding CLIs. Manages sessions, decomposes goals into work pack
 User
   |
   v
-cdx session start my-project --engine claude
+cdx config set engine claude               # one-time setup
+cdx doctor                                # check environment
+cdx session start my-project
 cdx execute plan.md --until-done          # plan mode
 cdx execute "fix login bug" --until-done  # no-plan mode
 cdx status                                # check progress
@@ -64,8 +66,15 @@ npm link          # makes `cdx` available globally
 ## Quick Start
 
 ```bash
+# First time: set defaults (once)
+cdx config set engine claude
+cdx config set path /path/to/project
+
+# Check environment
+cdx doctor
+
 # Start a session
-cdx session start my-project --engine claude --path /path/to/project
+cdx session start my-project
 
 # Execute a plan file (decomposes into WPs, runs in loop)
 cdx execute plan.md --until-done
@@ -108,13 +117,15 @@ cdx inspect --goal 1 --insights           # decisions, assumptions, questions
 Start or reactivate a session.
 
 ```bash
-cdx session start my-project --engine claude --path /path/to/project
+cdx session start my-project                          # uses config defaults
+cdx session start my-project --engine codex            # override engine
+cdx session start my-project --path /other/project     # override path
 ```
 
 | Flag | Required | Description |
 |------|----------|-------------|
-| `--engine` | No* | `claude` or `codex` (*required if no `defaultEngine` in config) |
-| `--path` | No* | Workspace path (*required if no default path set) |
+| `--engine` | No | Override default engine. Uses config/env fallback if omitted. |
+| `--path` | No | Override workspace path. Uses config default or cwd if omitted. |
 
 If a session with the same name already exists and is paused/created, it will be reactivated.
 
@@ -219,9 +230,64 @@ Inspect run metadata.
 
 ### Configuration
 
-#### `cdx set-path <path>` / `cdx get-path` / `cdx clear-path`
+#### `cdx config set <key> <value>`
 
-Manage default workspace path.
+Set a global config value. Short aliases supported.
+
+```bash
+cdx config set engine claude        # set default engine
+cdx config set path /path/to/project  # set default workspace path
+cdx config set heartbeat 30         # heartbeat interval (seconds)
+cdx config set stuck-threshold 120  # stall detection threshold (seconds)
+```
+
+#### `cdx config get <key>`
+
+Get a single config value.
+
+```bash
+cdx config get engine               # → claude
+```
+
+#### `cdx config show`
+
+Show all config values. On fresh install, shows quick-start guide.
+
+#### `cdx config unset <key>`
+
+Remove a config value.
+
+```bash
+cdx config unset engine
+```
+
+| Key | Alias for | Description |
+|-----|-----------|-------------|
+| `engine` | `defaultEngine` | Default engine: `claude` or `codex` |
+| `path` | `defaultPath` | Default workspace path |
+| `heartbeat` | `heartbeatIntervalSec` | Heartbeat check interval (seconds, default 15) |
+| `stuck-threshold` | `stuckThresholdSec` | Stall detection threshold (seconds, default 60) |
+
+**Legacy aliases:** `cdx set-path`, `cdx get-path`, `cdx clear-path` still work.
+
+#### `cdx doctor`
+
+Check environment and configuration. Shows what's set up, what's missing, and what to do next.
+
+```bash
+cdx doctor
+```
+
+```
+  [OK] Config file          ~/.conductor/config.json
+  [OK] Default engine       claude
+  [OK] Engine: claude       found in PATH
+  [--] Engine: codex        not found in PATH
+  [OK] Default path         /Users/me/projects/my-app
+  [OK] Active session       my-project [active]
+
+Ready to go.
+```
 
 ## Configuration
 
@@ -234,6 +300,24 @@ Persistent config at `~/.conductor/config.json`:
   "heartbeatIntervalSec": 15,
   "stuckThresholdSec": 60
 }
+```
+
+### Engine Resolution
+
+Engine is resolved with a priority chain — no need to specify `--engine` every time:
+
+1. `--engine` flag on current command
+2. Engine stored in session
+3. `defaultEngine` in config
+4. `DEFAULT_ENGINE` environment variable
+5. Helpful error with onboarding instructions
+
+```bash
+# One-time setup
+cdx config set engine claude
+
+# Then just use sessions
+cdx session start my-project
 ```
 
 ## Supervisor Loop
@@ -256,6 +340,47 @@ The supervisor loop (`cdx execute ... --until-done`) works as follows:
 **Goal lifecycle:** created → active → paused/completed/failed/hard_blocked/abandoned.
 
 **Closeout summary:** Generated at every terminal state with objective, files touched, decisions, blockers, and next recommended action.
+
+### Live Progress During Execution
+
+While the loop runs, periodic heartbeat events show real-time status:
+
+```
+── session: my-project | goal: Implement CMS ──
+[WP 1/5] Scan structure — attempt 1 (normal)
+[WP 1/5] heartbeat: alive | files: 3 | idle: 2s | last: Read | strategy: normal
+[WP 1/5] heartbeat: alive | files: 8 | idle: 0s | last: Edit | strategy: normal
+[WP 1/5] completed
+[WP 2/5] Build models — attempt 1 (normal)
+[WP 2/5] heartbeat: alive | files: 14 | idle: 5s | last: Write | strategy: normal
+[WP 2/5] no output for 65s — possible stall
+```
+
+Each heartbeat shows:
+- **status**: alive, idle, suspected_stuck, recovered
+- **files**: unique files touched during current run
+- **idle**: seconds since last engine output
+- **last**: most recent tool used (Read, Edit, Write, etc.)
+- **strategy**: current prompt strategy
+
+**Stall detection:** When no engine output exceeds the stuck threshold (default 60s), a visible warning is emitted. Heartbeat events are also persisted to the database for post-run analysis.
+
+### Live Status While Running
+
+`cdx status` and `cdx inspect` show live run info when a session is actively executing:
+
+```
+Session:  my-project [Running]
+Engine:   claude
+Path:     /path/to/project
+
+Goal:     Implement CMS [active]
+Progress: 2/5 WPs completed
+Current:  Build models
+
+Run:      3m 42s elapsed | strategy: focused
+Heartbeat: idle | idle: 35s
+```
 
 ## Data Storage
 
@@ -294,9 +419,10 @@ conductor/
         logs.ts                       # View run logs
         report.ts                     # Task-type-specific report display
         runs.ts                       # Run metadata inspection
-        config.ts                     # set-path, get-path, clear-path
+        config.ts                     # cdx config set/get/show/unset + legacy aliases
+        doctor.ts                     # cdx doctor — environment check
     core/
-      config/service.ts               # ~/.conductor/config.json read/write
+      config/service.ts               # Config read/write, resolveEngine(), key aliases
       supervisor/
         loop.ts                       # Main supervisor loop (until-done)
         scheduler.ts                  # WP scheduling, status counting
@@ -306,6 +432,7 @@ conductor/
         compactor.ts                  # Snapshot builder + decision extraction
         closeout.ts                   # Goal closeout summary generation
         progress-reporter.ts            # Live progress event formatting
+        live-tracker.ts                 # Real-time file/tool tracking during runs
         hygiene.ts                      # Session health warnings
       storage/
         schema.ts                     # SQL DDL + migrations
@@ -334,14 +461,14 @@ conductor/
       lookup.ts                       # Short-ID prefix resolution
   prompts/                            # Prompt templates per engine/task type
   data/                               # SQLite DB (gitignored)
-  tests/                              # Vitest test suite (265 tests, 26 files)
+  tests/                              # Vitest test suite (288 tests, 28 files)
 ```
 
 ## Development
 
 ```bash
 npm run dev -- <command>     # Run CLI in dev mode (tsx)
-npm test                     # Run all tests (265 tests)
+npm test                     # Run all tests (288 tests)
 npm run test:watch           # Watch mode
 npm run build                # Compile TypeScript to dist/
 npm link                     # Link cdx command globally

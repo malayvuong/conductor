@@ -135,6 +135,10 @@ export function getHeartbeatsByRunId(db: Database.Database, runId: string): Hear
   return db.prepare('SELECT * FROM heartbeat_events WHERE run_id = ? ORDER BY timestamp ASC').all(runId) as HeartbeatEvent[];
 }
 
+export function getLatestHeartbeat(db: Database.Database, runId: string): HeartbeatEvent | undefined {
+  return db.prepare('SELECT * FROM heartbeat_events WHERE run_id = ? ORDER BY timestamp DESC LIMIT 1').get(runId) as HeartbeatEvent | undefined;
+}
+
 // ---- Reports ----
 
 interface SaveReportInput {

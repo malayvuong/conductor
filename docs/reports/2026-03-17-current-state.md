@@ -1,8 +1,8 @@
 # Conductor Current-State Report
 
-**Date:** 2026-03-17
-**Version:** 2026.3.17
-**Codebase:** ~5,760 lines source / ~3,880 lines tests / 265 test cases / 26 test files
+**Date:** 2026-03-18
+**Version:** 2026.3.18
+**Codebase:** ~6,100 lines source / ~4,200 lines tests / 288 test cases / 28 test files
 
 ---
 
@@ -27,8 +27,16 @@ Supervisor Layer:
 - Session hygiene: passive warnings for stale sessions (>7 days) and paused goal accumulation (>=3)
 - History: compact format with seq numbers, `--verbose` for full detail
 
+Operational UX:
+- Configuration layer: `cdx config set/get/show/unset` with short key aliases (engine, path, heartbeat, stuck-threshold)
+- Engine resolution chain: CLI flag → session → config → env → helpful onboarding error
+- `cdx doctor` — environment and configuration diagnostic with actionable next steps
+- Live heartbeat visibility during execution: file count, idle time, last tool, strategy, stall warnings
+- Live run info in `cdx status` and `cdx inspect`: run age, heartbeat status, strategy
+- `LiveRunTracker` — real-time file/tool tracking from streaming engine output
+
 Execution Layer (stable):
-- CLI surface: 15 commands + 5 session subcommands + 3 config subcommands
+- CLI surface: 15 commands + 5 session subcommands + 4 config subcommands + doctor
 - Task intake, classification (Vietnamese + English), persistence
 - Prompt template system: 4 task types × 2 engines
 - SQLite persistence for all entities with auto-migrations
@@ -36,7 +44,7 @@ Execution Layer (stable):
 - Heartbeat monitoring (state-tracked, no spam)
 - Task-type-aware structured report generation
 - Resume with curated context from best previous run
-- 265 tests pass across 26 test files
+- 288 tests pass across 28 test files
 
 **What is partially implemented:**
 - `cdx logs` shows raw JSON lines for Claude runs (not parsed human-readable text)
@@ -69,7 +77,9 @@ Execution Layer (stable):
 | `cdx logs <runId>` | Working (degraded) | Shows raw JSON for Claude runs. |
 | `cdx report <runId>` | Working | Task-type-specific display with null suppression. |
 | `cdx runs show <runId>` | Working | Run metadata inspection. |
-| `cdx set-path / get-path / clear-path` | Working | Config management. |
+| `cdx config set/get/show/unset` | Working | Full config management with key aliases. |
+| `cdx doctor` | Working | Environment diagnostic: config, engines, session, env vars. |
+| `cdx set-path / get-path / clear-path` | Working (legacy) | Legacy aliases for config path. |
 
 ---
 
@@ -100,7 +110,7 @@ Lifecycle: created → active → paused/completed/failed/hard_blocked/abandoned
 - No-plan mode: completion signal + evidence required (files_changed, fix_applied, verification, or what_implemented)
 
 ### Live Progress Output
-**Status: Working.** `formatProgressEvent()` pure functions format 7 event types as compact single-line output. Integrated into supervisor loop, replacing scattered `log.info()` and `process.stdout.write('.')` calls. Goal-level summary emitted in execute.ts.
+**Status: Working.** `formatProgressEvent()` pure functions format 9 event types as compact single-line output (7 original + heartbeat + stall_warning). Integrated into supervisor loop with real-time heartbeat visibility: file count, idle time, last tool, strategy. `LiveRunTracker` accumulates file/tool stats from streaming engine output. Stall detection emits visible warning when no output exceeds threshold.
 
 ### Session Hygiene
 **Status: Working.** Pure function guardrails: `checkStaleSession()` warns after 7 days idle, `checkPausedGoals()` warns at 3+ paused goals. Injected into status display. Passive warnings only — never blocks execution.
@@ -150,7 +160,8 @@ Lifecycle: created → active → paused/completed/failed/hard_blocked/abandoned
 | Reporting | Ready | Task-type-aware extraction, no hallucination |
 | Resume | Ready | Quality-rated context, run linkage |
 | Persistence | Ready | All entities, auto-migrations, WAL mode |
-| Configuration | Ready | Default path, engine, heartbeat settings |
+| Configuration | Ready | `cdx config` set/get/show/unset, engine resolution chain, `cdx doctor` |
+| Live heartbeat | Ready | Real-time file/tool tracking, stall detection, visible in status/inspect |
 
 ---
 
@@ -191,7 +202,8 @@ Lifecycle: created → active → paused/completed/failed/hard_blocked/abandoned
 | src/cli/commands/logs.ts | View run logs |
 | src/cli/commands/report.ts | Task-type-specific report display |
 | src/cli/commands/runs.ts | Run metadata inspection |
-| src/cli/commands/config.ts | Config commands |
+| src/cli/commands/config.ts | Config commands (set/get/show/unset + legacy aliases) |
+| src/cli/commands/doctor.ts | Environment diagnostic command |
 | **Supervisor** | |
 | src/core/supervisor/loop.ts | Main supervisor loop (until-done) with progress events |
 | src/core/supervisor/scheduler.ts | WP scheduling + status counting |
@@ -200,7 +212,8 @@ Lifecycle: created → active → paused/completed/failed/hard_blocked/abandoned
 | src/core/supervisor/progress.ts | Evidence-based progress detection |
 | src/core/supervisor/compactor.ts | Snapshot builder + enhanced insight extraction |
 | src/core/supervisor/closeout.ts | Goal closeout summary generation |
-| src/core/supervisor/progress-reporter.ts | Live progress event formatting (pure functions) |
+| src/core/supervisor/progress-reporter.ts | Live progress event formatting (pure functions, 9 event types) |
+| src/core/supervisor/live-tracker.ts | Real-time file/tool tracking from streaming output |
 | src/core/supervisor/hygiene.ts | Session health warnings (stale, paused goals) |
 | **Storage** | |
 | src/core/storage/schema.ts | SQL DDL + migrations (incl. enhanced compaction columns) |
@@ -214,7 +227,7 @@ Lifecycle: created → active → paused/completed/failed/hard_blocked/abandoned
 | src/core/engine/stream-parser.ts | JSON event parser |
 | src/core/engine/log-interpreter.ts | Unified log parsing |
 | **Other Core** | |
-| src/core/config/service.ts | Config read/write |
+| src/core/config/service.ts | Config read/write, resolveEngine(), key aliases, onboarding messages |
 | src/core/task/normalizer.ts | Task classification |
 | src/core/prompt/builder.ts | Template loading + substitution |
 | src/core/runner/process.ts | spawn wrapper |
@@ -225,8 +238,9 @@ Lifecycle: created → active → paused/completed/failed/hard_blocked/abandoned
 | **Types** | |
 | src/types/index.ts | Execution layer types |
 | src/types/supervisor.ts | Supervisor layer types (incl. enhanced Snapshot) |
+| src/core/engine/types.ts | Adapter interface + factory + getAvailableEngines() |
 | **Tests** | |
-| tests/ (26 files) | 265 test cases |
+| tests/ (28 files) | 288 test cases |
 | prompts/ (8 files) | Prompt templates |
 
 ---
@@ -242,7 +256,8 @@ Lifecycle: created → active → paused/completed/failed/hard_blocked/abandoned
 | Goal management | None | Internal to supervisor, lifecycle states, auto-pause |
 | Work packages | None | Ordered, with retry budget, blocker tracking |
 | Execution loop | Single run | Supervisor loop: schedule → dispatch → evaluate → snapshot → advance |
-| Live progress | None | Compact single-line events during execution |
+| Live progress | None | Compact single-line events + heartbeat visibility + stall detection |
+| Configuration | `set-path` only | `cdx config` set/get/show/unset + engine resolution chain + `cdx doctor` |
 | Snapshots | None | Full state captured between runs for context continuity |
 | No-plan mode | N/A | Ad-hoc tasks with evidence-based completion |
 | Insight extraction | None | Decisions, assumptions, questions, follow-ups, constraints |
@@ -252,5 +267,5 @@ Lifecycle: created → active → paused/completed/failed/hard_blocked/abandoned
 | Session hygiene | None | Passive warnings for stale sessions and paused goal accumulation |
 | Prompt strategy | Static | Escalation: normal → focused → surgical → recovery |
 | DB tables | 5 (tasks, runs, logs, heartbeats, reports) | 10 (+ sessions, goals, work_packages, snapshots, execution_attempts) |
-| Source lines | ~1,700 | ~5,760 |
-| Test cases | 114 across 14 files | 265 across 26 files |
+| Source lines | ~1,700 | ~6,100 |
+| Test cases | 114 across 14 files | 288 across 28 files |

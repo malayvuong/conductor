@@ -25,6 +25,10 @@ const adapters: Record<string, () => EngineAdapter> = {
   codex: () => new CodexAdapter(),
 };
 
+export function getAvailableEngines(): string[] {
+  return Object.keys(adapters);
+}
+
 export function getEngine(name: string): EngineAdapter {
   const factory = adapters[name];
   if (!factory) {

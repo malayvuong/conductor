@@ -6,8 +6,9 @@ import {
   updateSessionStatus, getGoalsBySession, getWPsByGoal,
   getSnapshotsByGoal, getAttemptsByGoal, getSessionById,
   getGoalById, updateGoalStatus, updateSessionGoal, getGoalBySeq,
-  updateGoalCloseout,
+  updateGoalCloseout, getRunningAttempt,
 } from '../../core/storage/supervisor-repository.js';
+import { getLatestHeartbeat, getRunById } from '../../core/storage/repository.js';
 import { countWPsByStatus } from '../../core/supervisor/scheduler.js';
 import { buildCloseoutSummary } from '../../core/supervisor/closeout.js';
 import { getSessionWarnings } from '../../core/supervisor/hygiene.js';
@@ -111,6 +112,9 @@ function showSessionStatus(session: Session, goals: Goal[], db: import('better-s
 
     if (counts.failed) console.log(`Failed:   ${counts.failed} WPs`);
     if (counts.blocked) console.log(`Blocked:  ${counts.blocked} WPs`);
+
+    // Live run info (if currently executing)
+    showLiveRunInfo(db, activeGoal.id);
   } else if (goals.length > 0) {
     console.log('');
     console.log(`Goals:    ${goals.length} (no active goal)`);
@@ -131,6 +135,32 @@ function showSessionStatus(session: Session, goals: Goal[], db: import('better-s
   if (warnings.length > 0) {
     console.log('');
     displayWarnings(warnings);
+  }
+}
+
+function showLiveRunInfo(db: import('better-sqlite3').Database, goalId: string): void {
+  const running = getRunningAttempt(db, goalId);
+  if (!running || !running.run_id) return;
+
+  const run = getRunById(db, running.run_id);
+  if (!run || !run.started_at) return;
+
+  const startedAt = new Date(run.started_at).getTime();
+  const ageSeconds = Math.round((Date.now() - startedAt) / 1000);
+  const ageParts: string[] = [];
+  if (ageSeconds >= 60) ageParts.push(`${Math.floor(ageSeconds / 60)}m`);
+  ageParts.push(`${ageSeconds % 60}s`);
+
+  console.log('');
+  console.log(`Run:      ${ageParts.join(' ')} elapsed | strategy: ${running.prompt_strategy || 'normal'}`);
+
+  const hb = getLatestHeartbeat(db, running.run_id);
+  if (hb) {
+    const idle = Math.round(hb.no_output_seconds);
+    console.log(`Heartbeat: ${hb.status} | idle: ${idle}s`);
+    if (hb.summary && hb.status !== 'alive') {
+      console.log(`          ${hb.summary}`);
+    }
   }
 }
 
@@ -167,6 +197,11 @@ function showSessionInspect(session: Session, goals: Goal[], db: import('better-
     console.log(`  Source:     ${formatGoalSource(goal)}`);
     console.log(`  Progress:   ${counts.completed || 0}/${wps.length} WPs`);
     console.log(`  Attempts:   ${attempts.length}`);
+
+    // Live run info for active goals
+    if (isActive) {
+      showLiveRunInfo(db, goal.id);
+    }
     console.log('');
 
     // WPs

@@ -36,7 +36,7 @@ describe('formatProgressEvent', () => {
       detail: '3 files inspected',
     };
     expect(formatProgressEvent(event)).toBe(
-      '[WP 1/3] ✓ progress — 3 files inspected'
+      '[WP 1/3] progress — 3 files inspected'
     );
   });
 
@@ -46,7 +46,7 @@ describe('formatProgressEvent', () => {
       wpIndex: 2,
       wpTotal: 3,
     };
-    expect(formatProgressEvent(event)).toBe('[WP 2/3] ✓ completed');
+    expect(formatProgressEvent(event)).toBe('[WP 2/3] completed');
   });
 
   it('formats wp_failed event', () => {
@@ -57,7 +57,7 @@ describe('formatProgressEvent', () => {
       reason: 'retries exhausted',
     };
     expect(formatProgressEvent(event)).toBe(
-      '[WP 3/3] ✗ failed (retries exhausted)'
+      '[WP 3/3] failed (retries exhausted)'
     );
   });
 
@@ -69,7 +69,7 @@ describe('formatProgressEvent', () => {
       detail: 'missing test framework',
     };
     expect(formatProgressEvent(event)).toBe(
-      '[WP 2/3] ⚠ hard blocker: missing test framework'
+      '[WP 2/3] hard blocker: missing test framework'
     );
   });
 
@@ -96,6 +96,50 @@ describe('formatProgressEvent', () => {
     };
     expect(formatProgressEvent(event)).toBe(
       '── result: 0/1 completed | 1 attempts | $0.0000 ──'
+    );
+  });
+
+  it('formats heartbeat event with all fields', () => {
+    const event: ProgressEvent = {
+      type: 'heartbeat',
+      wpIndex: 3,
+      wpTotal: 20,
+      status: 'alive',
+      idleSeconds: 5,
+      filesTouched: 14,
+      lastTool: 'Edit',
+      strategy: 'normal',
+    };
+    expect(formatProgressEvent(event)).toBe(
+      '[WP 3/20] heartbeat: alive | files: 14 | idle: 5s | last: Edit | strategy: normal'
+    );
+  });
+
+  it('formats heartbeat event without files or tool', () => {
+    const event: ProgressEvent = {
+      type: 'heartbeat',
+      wpIndex: 1,
+      wpTotal: 5,
+      status: 'idle',
+      idleSeconds: 35,
+      filesTouched: 0,
+      lastTool: null,
+      strategy: 'focused',
+    };
+    expect(formatProgressEvent(event)).toBe(
+      '[WP 1/5] heartbeat: idle | idle: 35s | strategy: focused'
+    );
+  });
+
+  it('formats stall_warning event', () => {
+    const event: ProgressEvent = {
+      type: 'stall_warning',
+      wpIndex: 3,
+      wpTotal: 20,
+      idleSeconds: 65,
+    };
+    expect(formatProgressEvent(event)).toBe(
+      '[WP 3/20] no output for 65s — possible stall'
     );
   });
 });

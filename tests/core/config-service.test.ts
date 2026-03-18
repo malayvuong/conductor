@@ -2,11 +2,10 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
-import { resolveEngine, resolveConfigKey, listConfigKeys, engineNotConfiguredMessage } from '../../src/core/config/service.js';
-
-// We test the config service by importing and using it with a temp directory
-// Since the config service uses a fixed path (~/.conductor), we'll test the
-// core logic directly.
+import {
+  resolveEngine, resolveConfigKey, listConfigKeys,
+  engineNotConfiguredMessage,
+} from '../../src/core/config/service.js';
 
 describe('config service', () => {
   const tmpDir = path.join(os.tmpdir(), `conductor-test-${Date.now()}`);
@@ -44,8 +43,14 @@ describe('config service', () => {
   });
 });
 
-describe('resolveEngine', () => {
+// ---- Engine resolution precedence ----
+// Uses configOverride to isolate from real ~/.conductor/config.json
+
+describe('resolveEngine precedence', () => {
   const origEnv = process.env.DEFAULT_ENGINE;
+  const NO_CONFIG = {};
+  const CONFIG_CLAUDE = { defaultEngine: 'claude' };
+  const CONFIG_CODEX = { defaultEngine: 'codex' };
 
   afterEach(() => {
     if (origEnv === undefined) {
@@ -55,37 +60,51 @@ describe('resolveEngine', () => {
     }
   });
 
-  it('returns explicit engine when provided', () => {
-    const result = resolveEngine('codex');
-    expect(result).toEqual({ engine: 'codex', source: 'explicit' });
+  // Priority 1: explicit --engine flag wins over everything
+  it('explicit wins over session + config + env', () => {
+    process.env.DEFAULT_ENGINE = 'from-env';
+    const result = resolveEngine('explicit-engine', 'session-engine', CONFIG_CODEX);
+    expect(result).toEqual({ engine: 'explicit-engine', source: 'explicit' });
   });
 
-  it('returns session engine when no explicit', () => {
-    const result = resolveEngine(undefined, 'codex');
-    expect(result).toEqual({ engine: 'codex', source: 'session' });
+  // Priority 2: session engine when no explicit
+  it('session wins over config + env', () => {
+    process.env.DEFAULT_ENGINE = 'from-env';
+    const result = resolveEngine(undefined, 'session-engine', CONFIG_CODEX);
+    expect(result).toEqual({ engine: 'session-engine', source: 'session' });
   });
 
-  it('prefers explicit over session engine', () => {
-    const result = resolveEngine('claude', 'codex');
-    expect(result).toEqual({ engine: 'claude', source: 'explicit' });
+  // Priority 3: config when no explicit or session
+  it('config wins over env', () => {
+    process.env.DEFAULT_ENGINE = 'from-env';
+    const result = resolveEngine(undefined, undefined, CONFIG_CLAUDE);
+    expect(result).toEqual({ engine: 'claude', source: 'config' });
   });
 
-  it('falls back to env var', () => {
-    process.env.DEFAULT_ENGINE = 'codex';
-    // If ~/.conductor/config.json has defaultEngine this returns 'config',
-    // otherwise 'env'. Either way it should not be null.
-    const result = resolveEngine(undefined);
-    expect(result).not.toBeNull();
-    expect(result!.engine).toBeTruthy();
+  // Priority 4: env var when no explicit, session, or config
+  it('env var used when no explicit/session/config', () => {
+    process.env.DEFAULT_ENGINE = 'from-env';
+    const result = resolveEngine(undefined, undefined, NO_CONFIG);
+    expect(result).toEqual({ engine: 'from-env', source: 'env' });
   });
 
-  it('returns null when nothing is configured and no env', () => {
+  // Priority 5: null when nothing is set
+  it('returns null when nothing is configured', () => {
     delete process.env.DEFAULT_ENGINE;
-    // This depends on whether ~/.conductor/config.json exists.
-    // We test the function signature — it returns ResolvedEngine | null.
-    const result = resolveEngine(undefined);
-    // Can't assert null because real config may exist, but type is correct.
-    expect(result === null || typeof result.engine === 'string').toBe(true);
+    const result = resolveEngine(undefined, undefined, NO_CONFIG);
+    expect(result).toBeNull();
+  });
+
+  // Edge: explicit empty string should NOT count
+  it('ignores empty string for explicit', () => {
+    const result = resolveEngine('', 'session-engine', NO_CONFIG);
+    expect(result).toEqual({ engine: 'session-engine', source: 'session' });
+  });
+
+  // Edge: session empty string should NOT count
+  it('ignores empty string for session', () => {
+    const result = resolveEngine(undefined, '', CONFIG_CLAUDE);
+    expect(result).toEqual({ engine: 'claude', source: 'config' });
   });
 });
 
@@ -119,9 +138,10 @@ describe('listConfigKeys', () => {
 });
 
 describe('engineNotConfiguredMessage', () => {
-  it('returns helpful onboarding text', () => {
+  it('shows full quick-start flow', () => {
     const msg = engineNotConfiguredMessage();
     expect(msg).toContain('cdx config set engine claude');
     expect(msg).toContain('cdx session start');
+    expect(msg).toContain('cdx execute');
   });
 });

@@ -5,7 +5,9 @@ export type ProgressEvent =
   | { type: 'wp_completed'; wpIndex: number; wpTotal: number }
   | { type: 'wp_failed'; wpIndex: number; wpTotal: number; reason: string }
   | { type: 'hard_blocker'; wpIndex: number; wpTotal: number; detail: string }
-  | { type: 'goal_end'; completed: number; total: number; attempts: number; cost: number };
+  | { type: 'goal_end'; completed: number; total: number; attempts: number; cost: number }
+  | { type: 'heartbeat'; wpIndex: number; wpTotal: number; status: string; idleSeconds: number; filesTouched: number; lastTool: string | null; strategy: string }
+  | { type: 'stall_warning'; wpIndex: number; wpTotal: number; idleSeconds: number };
 
 function wp(wpIndex: number, wpTotal: number): string {
   return `[WP ${wpIndex}/${wpTotal}]`;
@@ -20,18 +22,30 @@ export function formatProgressEvent(event: ProgressEvent): string {
       return `${wp(event.wpIndex, event.wpTotal)} ${event.title} — attempt ${event.attempt} (${event.strategy})`;
 
     case 'wp_progress':
-      return `${wp(event.wpIndex, event.wpTotal)} ✓ progress — ${event.detail}`;
+      return `${wp(event.wpIndex, event.wpTotal)} progress — ${event.detail}`;
 
     case 'wp_completed':
-      return `${wp(event.wpIndex, event.wpTotal)} ✓ completed`;
+      return `${wp(event.wpIndex, event.wpTotal)} completed`;
 
     case 'wp_failed':
-      return `${wp(event.wpIndex, event.wpTotal)} ✗ failed (${event.reason})`;
+      return `${wp(event.wpIndex, event.wpTotal)} failed (${event.reason})`;
 
     case 'hard_blocker':
-      return `${wp(event.wpIndex, event.wpTotal)} ⚠ hard blocker: ${event.detail}`;
+      return `${wp(event.wpIndex, event.wpTotal)} hard blocker: ${event.detail}`;
 
     case 'goal_end':
       return `── result: ${event.completed}/${event.total} completed | ${event.attempts} attempts | $${event.cost.toFixed(4)} ──`;
+
+    case 'heartbeat': {
+      const parts: string[] = [`heartbeat: ${event.status}`];
+      if (event.filesTouched > 0) parts.push(`files: ${event.filesTouched}`);
+      parts.push(`idle: ${event.idleSeconds}s`);
+      if (event.lastTool) parts.push(`last: ${event.lastTool}`);
+      parts.push(`strategy: ${event.strategy}`);
+      return `${wp(event.wpIndex, event.wpTotal)} ${parts.join(' | ')}`;
+    }
+
+    case 'stall_warning':
+      return `${wp(event.wpIndex, event.wpTotal)} no output for ${event.idleSeconds}s — possible stall`;
   }
 }
